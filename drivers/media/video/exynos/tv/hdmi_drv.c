@@ -277,6 +277,7 @@ static int hdmi_s_power(struct v4l2_subdev *sd, int on)
 
 		s5p_v4l2_int_src_hdmi_hpd();
 		hdmi_hpd_enable(hdev, 1);
+		hdmi_hpd_clear_int(hdev);
 		enable_irq(hdev->int_irq);
 
 		dev_info(hdev->dev, "HDMI interrupt changed to internal\n");
@@ -764,19 +765,16 @@ static void hdmi_hpd_work_ext(struct work_struct *work)
 	int state;
 	struct hdmi_device *hdev = container_of(work, struct hdmi_device,
 						hpd_work_ext.work);
-
 	state = s5p_v4l2_hpd_read_gpio();
 	hdmi_hpd_changed(hdev, state);
 }
 
 static void hdmi_hpd_work(struct work_struct *work)
 {
-	int state;
 	struct hdmi_device *hdev = container_of(work, struct hdmi_device,
 						hpd_work);
 
-	state = hdmi_hpd_status(hdev);
-	hdmi_hpd_changed(hdev, state);
+	hdmi_hpd_changed(hdev, 0);
 }
 
 static int __devinit hdmi_probe(struct platform_device *pdev)
