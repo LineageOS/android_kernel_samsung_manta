@@ -581,6 +581,7 @@ static struct dw_mci_board exynos_dwmci0_pdata __initdata = {
 	.num_slots		= 1,
 	.quirks			= DW_MCI_QUIRK_BROKEN_CARD_DETECTION |
 				  DW_MCI_QUIRK_HIGHSPEED |
+                                  DW_MMC_QUIRK_HW_RESET_PW |
 				  DW_MCI_QUIRK_NO_DETECT_EBIT,
 	.bus_hz			= 50 * 1000 * 1000,
 	.max_bus_hz		= 200 * 1000 * 1000,
