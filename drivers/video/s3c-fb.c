@@ -3340,11 +3340,26 @@ static int __devinit s3c_fb_clear_fb(struct s3c_fb *sfb,
 
 #ifdef CONFIG_DEBUG_FS
 
+static void s3c_fb_debugfs_hex_dump(struct seq_file *f, const void *regs,
+		size_t size, size_t offset)
+{
+	size_t i;
+	for (i = 0; i < size; i += 32) {
+		unsigned char buf[128];
+		hex_dump_to_buffer(regs + i, 32, 32, 4, buf, sizeof(buf),
+				false);
+		seq_printf(f, "%.8x: %s\n", offset + i, buf);
+	}
+}
+
 static int s3c_fb_debugfs_show(struct seq_file *f, void *offset)
 {
 	struct s3c_fb *sfb = f->private;
 	struct s3c_fb_debug *debug_data = kzalloc(sizeof(struct s3c_fb_debug),
 			GFP_KERNEL);
+#ifdef CONFIG_FB_EXYNOS_FIMD_V8
+	u8 regs[0x280], shadow_regs[0x74], vid_regs[0x20];
+#endif
 
 	if (!debug_data) {
 		seq_printf(f, "kmalloc() failed; can't generate file\n");
@@ -3354,6 +3369,23 @@ static int s3c_fb_debugfs_show(struct seq_file *f, void *offset)
 	spin_lock(&sfb->slock);
 	memcpy(debug_data, &sfb->debug_data, sizeof(sfb->debug_data));
 	spin_unlock(&sfb->slock);
+
+#ifdef CONFIG_FB_EXYNOS_FIMD_V8
+	pm_runtime_get_sync(sfb->dev);
+	memcpy_fromio(regs, sfb->regs, sizeof(regs));
+	memcpy_fromio(shadow_regs, sfb->regs + SHD_VIDW_BUF_START(0),
+			sizeof(shadow_regs));
+	memcpy_fromio(vid_regs, sfb->regs + 0x20000, sizeof(vid_regs));
+	pm_runtime_put_sync(sfb->dev);
+
+	s3c_fb_debugfs_hex_dump(f, regs, ARRAY_SIZE(regs), 0);
+	seq_printf(f, "...\n");
+	s3c_fb_debugfs_hex_dump(f, shadow_regs, ARRAY_SIZE(shadow_regs),
+			SHD_VIDW_BUF_START(0));
+	seq_printf(f, "...\n");
+	s3c_fb_debugfs_hex_dump(f, vid_regs, ARRAY_SIZE(vid_regs), 0x20000);
+	seq_printf(f, "\n");
+#endif
 
 	seq_printf(f, "%u FIFO underflows\n", debug_data->num_timestamps);
 	if (debug_data->num_timestamps) {
@@ -3370,13 +3402,8 @@ static int s3c_fb_debugfs_show(struct seq_file *f, void *offset)
 		}
 
 		seq_printf(f, "Registers at time of last underflow:\n");
-		for (i = 0; i < S3C_FB_DEBUG_REGS_SIZE; i += 32) {
-			unsigned char buf[128];
-			hex_dump_to_buffer(debug_data->regs_at_underflow + i,
-					32, 32, 4, buf,
-					sizeof(buf), false);
-			seq_printf(f, "%.8x: %s\n", i, buf);
-		}
+		s3c_fb_debugfs_hex_dump(f, debug_data->regs_at_underflow,
+				S3C_FB_DEBUG_REGS_SIZE, 0);
 	}
 
 	kfree(debug_data);
