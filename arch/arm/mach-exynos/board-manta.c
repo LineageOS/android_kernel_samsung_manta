@@ -385,6 +385,7 @@ static struct tmu_data manta_tmu_pdata __initdata = {
 /* defined in arch/arm/mach-exynos/reserve-mem.c */
 extern void exynos_cma_region_reserve(struct cma_region *,
 				struct cma_region *, size_t, const char *);
+extern int kbase_carveout_mem_reserve(phys_addr_t size);
 
 static void __init exynos_reserve_mem(void)
 {
@@ -497,6 +498,7 @@ static void __init exynos_reserve_mem(void)
 	}
 
 	exynos_cma_region_reserve(regions, regions_secure, 0, map);
+	kbase_carveout_mem_reserve(384 * SZ_1M);
 }
 
 static void exynos_dwmci0_cfg_gpio(int width)
