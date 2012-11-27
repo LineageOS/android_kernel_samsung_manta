@@ -164,9 +164,11 @@ platform_name := $(shell echo $(CONFIG_MALI_PLATFORM_THIRDPARTY_NAME))
 endif
 
 # Tell the Linux build system from which .o file to create the kernel module
-obj-$(CONFIG_MALI_T6XX) += mali_kbase.o
-obj-$(CONFIG_MALI_T6XX) += platform/mali_kbase_platform.o
-obj-$(CONFIG_MALI_T6XX) += platform/mali_kbase_dvfs.o
+ifeq ($(CONFIG_MALI_T6XX),y)
+     obj-y += mali_kbase.o
+     SRC += platform/mali_kbase_platform.c
+     SRC += platform/mali_kbase_dvfs.c
+endif
 
 # Tell the Linux build system to enable building of our .c files
 mali_kbase-y := $(SRC:.c=.o)
