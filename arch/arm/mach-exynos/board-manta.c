@@ -590,8 +590,7 @@ static struct dw_mci_board exynos_dwmci0_pdata __initdata = {
 	.caps			= MMC_CAP_UHS_DDR50 | MMC_CAP_1_8V_DDR |
 				  MMC_CAP_8_BIT_DATA | MMC_CAP_CMD23 | MMC_CAP_ERASE |
 				  MMC_CAP_HW_RESET,
-	.caps2 			= MMC_CAP2_HS200_1_8V_SDR | MMC_CAP2_PACKED_WR,
-	.desc_sz		= 4,
+	.caps2 			= MMC_CAP2_HS200_1_8V_SDR,
 	.fifo_depth             = 0x80,
 	.detect_delay_ms	= 200,
 	.hclk_name		= "dwmci",
