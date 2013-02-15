@@ -215,6 +215,8 @@ struct dw_mci_dma_ops {
 #define DW_MCI_QUIRK_BROKEN_CARD_DETECTION	BIT(3)
 /* No detect end bit during read */
 #define DW_MCI_QUIRK_NO_DETECT_EBIT             BIT(4)
+/* Hardware reset using power off/on of card */
+#define DW_MMC_QUIRK_HW_RESET_PW 		BIT(5)
 
 enum dw_mci_cd_types {
 	DW_MCI_CD_INTERNAL,	/* use mmc internal CD line */
@@ -265,6 +267,7 @@ struct dw_mci_board {
 	int (*get_ocr)(u32 slot_id);
 	int (*get_bus_wd)(u32 slot_id);
 	void (*cfg_gpio)(int width);
+	void (*hw_reset)(u32 slot_id);
 	void (*set_io_timing)(void *data, unsigned char timing);
 
 	/* Phase Shift Value */

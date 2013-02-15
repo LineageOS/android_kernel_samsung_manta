@@ -23,6 +23,7 @@
 #include <linux/videodev2.h>
 #include <linux/videodev2_exynos_media.h>
 #include <linux/proc_fs.h>
+#include <linux/pm_wakeup.h>
 #include <mach/videonode.h>
 #include <media/videobuf2-core.h>
 
@@ -40,6 +41,8 @@
 #define S5P_MFC_NAME		"s5p-mfc"
 #define S5P_MFC_DEC_NAME	"s5p-mfc-dec"
 #define S5P_MFC_ENC_NAME	"s5p-mfc-enc"
+
+#define DISABLE_SLEEP
 
 int debug;
 module_param(debug, int, S_IRUGO | S_IWUSR);
@@ -101,10 +104,7 @@ static inline void wake_up_ctx(struct s5p_mfc_ctx *ctx, unsigned int reason,
 	ctx->int_cond = 1;
 	ctx->int_type = reason;
 	ctx->int_err = err;
-	if (ctx->state != MFCINST_ABORT && ctx->state != MFCINST_FREE)
-		wake_up_interruptible(&ctx->queue);
-	else
-		wake_up(&ctx->queue);
+	wake_up(&ctx->queue);
 }
 
 /* Wake up device wait_queue */
@@ -633,14 +633,41 @@ static irqreturn_t s5p_mfc_irq(int irq, void *priv)
 	mfc_debug_enter();
 	/* Reset the timeout watchdog */
 	atomic_set(&dev->watchdog_cnt, 0);
-	ctx = dev->ctx[dev->curr_ctx];
-	if (ctx->type == MFCINST_DECODER)
-		dec = ctx->dec_priv;
 
 	/* Get the reason of interrupt and the error code */
 	reason = s5p_mfc_get_int_reason();
 	err = s5p_mfc_get_int_err();
 	mfc_debug(2, "Int reason: %d (err: %d)\n", reason, err);
+
+	/* don't try to lookup current context for these operations */
+	switch (reason) {
+	case S5P_FIMV_R2H_CMD_SYS_INIT_RET:
+	case S5P_FIMV_R2H_CMD_FW_STATUS_RET:
+	case S5P_FIMV_R2H_CMD_SLEEP_RET:
+	case S5P_FIMV_R2H_CMD_WAKEUP_RET:
+		s5p_mfc_clear_int_flags();
+		wake_up_dev(dev, reason, err);
+		/* Initialize hw_lock */
+		dev->hw_lock = 0;
+		goto done;
+	}
+
+	ctx = dev->ctx[dev->curr_ctx];
+	if (!ctx) {
+		unsigned long r2h_int;
+
+		mfc_err("Invalid context %d: num_insts=%d work_bits=%lx hw_lock=%lx\n",
+			dev->curr_ctx, dev->num_inst, dev->ctx_work_bits,
+			dev->hw_lock);
+		r2h_int = readl(dev->regs_base + S5P_FIMV_RISC2HOST_INT);
+		mfc_err("   reason=%d err=%d r2h_int=%lx\n",
+			reason, err, r2h_int);
+		BUG();
+	}
+
+	if (ctx->type == MFCINST_DECODER)
+		dec = ctx->dec_priv;
+
 	switch (reason) {
 	case S5P_FIMV_R2H_CMD_ERR_RET:
 		/* An error has occured */
@@ -732,15 +759,6 @@ static irqreturn_t s5p_mfc_irq(int irq, void *priv)
 		wake_up_ctx(ctx, reason, err);
 		goto irq_cleanup_hw;
 		break;
-	case S5P_FIMV_R2H_CMD_SYS_INIT_RET:
-	case S5P_FIMV_R2H_CMD_FW_STATUS_RET:
-	case S5P_FIMV_R2H_CMD_SLEEP_RET:
-	case S5P_FIMV_R2H_CMD_WAKEUP_RET:
-		s5p_mfc_clear_int_flags();
-		wake_up_dev(dev, reason, err);
-		/* Initialize hw_lock */
-		dev->hw_lock = 0;
-		break;
 	case S5P_FIMV_R2H_CMD_INIT_BUFFERS_RET:
 		s5p_mfc_clear_int_flags();
 		ctx->int_type = reason;
@@ -783,7 +801,7 @@ static irqreturn_t s5p_mfc_irq(int irq, void *priv)
 
 			s5p_mfc_clock_off();
 
-			wake_up_interruptible(&ctx->queue);
+			wake_up(&ctx->queue);
 
 			queue_work(dev->irq_workqueue, &dev->work_struct);
 		} else {
@@ -792,15 +810,18 @@ static irqreturn_t s5p_mfc_irq(int irq, void *priv)
 
 			s5p_mfc_clock_off();
 
-			wake_up_interruptible(&ctx->queue);
+			wake_up(&ctx->queue);
 		}
 		break;
 	default:
 		mfc_debug(2, "Unknown int reason.\n");
 		s5p_mfc_clear_int_flags();
 	}
+
+done:
 	mfc_debug_leave();
 	return IRQ_HANDLED;
+
 irq_cleanup_hw:
 	s5p_mfc_clear_int_flags();
 	if (test_and_clear_bit(ctx->num, &dev->hw_lock) == 0)
@@ -839,6 +860,8 @@ static int s5p_mfc_open(struct file *file)
 	}
 #endif
 	dev->num_inst++;	/* It is guarded by mfc_mutex in vfd */
+	if (dev->num_inst == 1)
+		__pm_stay_awake(&dev->mfc_ws);
 
 	/* Allocate memory for context */
 	ctx = kzalloc(sizeof *ctx, GFP_KERNEL);
@@ -972,7 +995,10 @@ err_pwr_enable:
 	s5p_mfc_release_dev_context_buffer(dev);
 #endif
 err_fw_load:
+#ifndef CONFIG_EXYNOS_CONTENT_PATH_PROTECTION
+	/* only release the firmware buffers when DRM is not possible */
 	s5p_mfc_release_firmware(dev);
+#endif
 
 err_fw_alloc:
 	del_timer_sync(&dev->watchdog_timer);
@@ -1002,6 +1028,8 @@ err_ctx_num:
 
 err_ctx_alloc:
 	dev->num_inst--;
+	if (dev->num_inst == 0)
+		__pm_relax(&dev->mfc_ws);
 
 #ifdef CONFIG_EXYNOS_CONTENT_PATH_PROTECTION
 err_drm_playback:
@@ -1044,7 +1072,7 @@ static int s5p_mfc_release(struct file *file)
 		s5p_mfc_try_run(dev);
 		/* Wait until instance is returned or timeout occured */
 		if (s5p_mfc_wait_for_done_ctx
-		    (ctx, S5P_FIMV_R2H_CMD_CLOSE_INSTANCE_RET, 0)) {
+		    (ctx, S5P_FIMV_R2H_CMD_CLOSE_INSTANCE_RET)) {
 			mfc_err("Err returning instance.\n");
 		}
 		/* Free resources */
@@ -1078,6 +1106,8 @@ static int s5p_mfc_release(struct file *file)
 
 		mfc_debug(2, "power off\n");
 		s5p_mfc_power_off();
+		__pm_relax(&dev->mfc_ws);
+
 	}
 
 	if (ctx->type == MFCINST_DECODER)
@@ -1228,6 +1258,8 @@ static int __devinit s5p_mfc_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "failed to get mfc clock source\n");
 		goto free_clk;
 	}
+
+	wakeup_source_init(&dev->mfc_ws, "mfc");
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (res == NULL) {
@@ -1491,6 +1523,7 @@ probe_out3:
 	kfree(dev->mfc_mem);
 probe_out2:
 probe_out1:
+	wakeup_source_trash(&dev->mfc_ws);
 	s5p_mfc_final_pm(dev);
 free_clk:
 
@@ -1534,6 +1567,7 @@ static int __devexit s5p_mfc_remove(struct platform_device *pdev)
 		kfree(dev->mfc_mem);
 		dev->mfc_mem = NULL;
 	}
+	wakeup_source_trash(&dev->mfc_ws);
 	s5p_mfc_final_pm(dev);
 	kfree(dev);
 	dev_dbg(&pdev->dev, "%s--\n", __func__);
@@ -1549,7 +1583,11 @@ static int s5p_mfc_suspend(struct device *dev)
 	if (m_dev->num_inst == 0)
 		return 0;
 
+#ifndef DISABLE_SLEEP
 	ret = s5p_mfc_sleep(m_dev);
+#else
+	ret = -EBUSY;
+#endif
 
 	return ret;
 }
@@ -1562,7 +1600,13 @@ static int s5p_mfc_resume(struct device *dev)
 	if (m_dev->num_inst == 0)
 		return 0;
 
+#ifndef DISABLE_SLEEP
 	ret = s5p_mfc_wakeup(m_dev);
+#else
+	/* cannot be here without sleep enabled since suspend would return
+	 * an error */
+	BUG();
+#endif
 
 	return ret;
 }

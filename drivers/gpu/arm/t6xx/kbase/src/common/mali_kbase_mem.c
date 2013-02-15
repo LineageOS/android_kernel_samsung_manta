@@ -30,15 +30,115 @@
 #include <kbase/src/common/mali_kbase_gator.h>
 
 #include <asm/atomic.h>
+#include <linux/debugfs.h>
 #include <linux/highmem.h>
-#include <linux/mempool.h>
+#include <linux/memblock.h>
 #include <linux/mm.h>
+#include <linux/seq_file.h>
 
-struct kbase_page_metadata
+static unsigned long kbase_carveout_start_pfn = ~0UL;
+static unsigned long kbase_carveout_end_pfn;
+static LIST_HEAD(kbase_carveout_free_list);
+static DEFINE_MUTEX(kbase_carveout_free_list_lock);
+static unsigned int kbase_carveout_pages;
+static atomic_t kbase_carveout_used_pages;
+static atomic_t kbase_carveout_system_pages;
+
+static struct page *kbase_carveout_get_page(void)
 {
-	struct list_head list;
-	struct page * page;
+	struct page *p = NULL;
+
+	mutex_lock(&kbase_carveout_free_list_lock);
+	if (!list_empty(&kbase_carveout_free_list)) {
+		p = list_first_entry(&kbase_carveout_free_list, struct page, lru);
+		list_del(&p->lru);
+		atomic_inc(&kbase_carveout_used_pages);
+	}
+	mutex_unlock(&kbase_carveout_free_list_lock);
+
+	if (!p) {
+		p = alloc_page(GFP_HIGHUSER);
+		if (p) {
+			atomic_inc(&kbase_carveout_system_pages);
+		}
+	}
+
+	return p;
+}
+
+static void kbase_carveout_put_page(struct page *p)
+{
+	if (page_to_pfn(p) >= kbase_carveout_start_pfn &&
+			page_to_pfn(p) <= kbase_carveout_end_pfn) {
+		mutex_lock(&kbase_carveout_free_list_lock);
+		list_add(&p->lru, &kbase_carveout_free_list);
+		atomic_dec(&kbase_carveout_used_pages);
+		mutex_unlock(&kbase_carveout_free_list_lock);
+	} else {
+		__free_page(p);
+		atomic_dec(&kbase_carveout_system_pages);
+	}
+}
+
+static int kbase_carveout_seq_show(struct seq_file *s, void *data)
+{
+	seq_printf(s, "carveout pages: %u\n", kbase_carveout_pages);
+	seq_printf(s, "used carveout pages: %u\n",
+			atomic_read(&kbase_carveout_used_pages));
+	seq_printf(s, "used system pages: %u\n",
+			atomic_read(&kbase_carveout_system_pages));
+	return 0;
+}
+
+static int kbasep_carveout_debugfs_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, kbase_carveout_seq_show, NULL);
+}
+
+static const struct file_operations kbase_carveout_debugfs_fops = {
+	.open           = kbasep_carveout_debugfs_open,
+	.read           = seq_read,
+	.llseek         = seq_lseek,
+	.release        = seq_release_private,
 };
+
+static int kbase_carveout_init(void)
+{
+	unsigned long pfn;
+
+	mutex_lock(&kbase_carveout_free_list_lock);
+
+	for (pfn = kbase_carveout_start_pfn; pfn <= kbase_carveout_end_pfn; pfn++) {
+		struct page *p = pfn_to_page(pfn);
+		list_add_tail(&p->lru, &kbase_carveout_free_list);
+	}
+
+	mutex_unlock(&kbase_carveout_free_list_lock);
+
+	debugfs_create_file("kbase_carveout", S_IRUGO, NULL, NULL,
+		    &kbase_carveout_debugfs_fops);
+
+	return 0;
+}
+subsys_initcall(kbase_carveout_init);
+
+int kbase_carveout_mem_reserve(phys_addr_t size)
+{
+	phys_addr_t mem;
+
+	mem = memblock_alloc_base(size, PAGE_SIZE, MEMBLOCK_ALLOC_ANYWHERE);
+	if (mem == 0) {
+		pr_warning("%s: Failed to allocate %d for kbase carveout\n",
+				__func__, size);
+		return -ENOMEM;
+	}
+
+	kbase_carveout_start_pfn = page_to_pfn(phys_to_page(mem));
+	kbase_carveout_end_pfn = page_to_pfn(phys_to_page(mem + size - 1));
+	kbase_carveout_pages = kbase_carveout_end_pfn - kbase_carveout_start_pfn + 1;
+
+	return 0;
+}
 
 STATIC int kbase_mem_allocator_shrink(struct shrinker *s, struct shrink_control *sc)
 {
@@ -62,17 +162,11 @@ STATIC int kbase_mem_allocator_shrink(struct shrinker *s, struct shrink_control 
 
 	while (i--)
 	{
-		struct kbase_page_metadata * md;
 		struct page * p;
 		BUG_ON(list_empty(&allocator->free_list_head));
-		md = list_first_entry(&allocator->free_list_head, struct kbase_page_metadata, list);
-		list_del(&md->list);
-		p = md->page;
-		if (likely(PageHighMem(p)))
-		{
-			mempool_free(md, allocator->free_list_highmem_pool);
-		}
-		__free_page(p);
+		p = list_first_entry(&allocator->free_list_head, struct page, lru);
+		list_del(&p->lru);
+		kbase_carveout_put_page(p);
 	}
 
 	mutex_unlock(&allocator->free_list_lock);
@@ -83,18 +177,6 @@ STATIC int kbase_mem_allocator_shrink(struct shrinker *s, struct shrink_control 
 mali_error kbase_mem_allocator_init(kbase_mem_allocator * const allocator, unsigned int max_size)
 {
 	OSK_ASSERT(NULL != allocator);
-
-	allocator->free_list_highmem_slab = KMEM_CACHE(kbase_page_metadata, SLAB_HWCACHE_ALIGN);
-	if (!allocator->free_list_highmem_slab)
-	{
-		return MALI_ERROR_OUT_OF_MEMORY;
-	}
-	allocator->free_list_highmem_pool = mempool_create_slab_pool(0, allocator->free_list_highmem_slab);
-	if (!allocator->free_list_highmem_pool)
-	{
-		kmem_cache_destroy(allocator->free_list_highmem_slab);
-		return MALI_ERROR_OUT_OF_MEMORY;
-	}
 
 	INIT_LIST_HEAD(&allocator->free_list_head);
 	mutex_init(&allocator->free_list_lock);
@@ -119,27 +201,18 @@ void kbase_mem_allocator_term(kbase_mem_allocator *allocator)
 
 	while (!list_empty(&allocator->free_list_head))
 	{
-		struct kbase_page_metadata * md;
 		struct page * p;
-		md = list_first_entry(&allocator->free_list_head, struct kbase_page_metadata, list);
-		list_del(&md->list);
-		p = md->page;
-		if (likely(PageHighMem(p)))
-		{
-			mempool_free(md, allocator->free_list_highmem_pool);
-		}
-		__free_page(p);
+		p = list_first_entry(&allocator->free_list_head, struct page, lru);
+		list_del(&p->lru);
+		kbase_carveout_put_page(p);
 	}
 
-	mempool_destroy(allocator->free_list_highmem_pool);
-	kmem_cache_destroy(allocator->free_list_highmem_slab);
 }
 
 mali_error kbase_mem_allocator_alloc(kbase_mem_allocator *allocator, u32 nr_pages, osk_phy_addr *pages, int flags)
 {
-	struct kbase_page_metadata * md;
-	struct kbase_page_metadata * tmp;
 	struct page * p;
+	struct page * tmp;
 	void * mp;
 	int i;
 	int num_from_free_list;
@@ -158,32 +231,21 @@ mali_error kbase_mem_allocator_alloc(kbase_mem_allocator *allocator, u32 nr_page
 	for (i = 0; i < num_from_free_list; i++)
 	{
 		BUG_ON(list_empty(&allocator->free_list_head));
-		md = list_first_entry(&allocator->free_list_head, struct kbase_page_metadata, list);
-		list_move(&md->list, &from_free_list);
+		p = list_first_entry(&allocator->free_list_head, struct page, lru);
+		list_move(&p->lru, &from_free_list);
 	}
 	mutex_unlock(&allocator->free_list_lock);
 
 	i = 0;
-	list_for_each_entry_safe(md, tmp, &from_free_list, list)
+	list_for_each_entry_safe(p, tmp, &from_free_list, lru)
 	{
-		list_del(&md->list);
-		p = md->page;
-		if (likely(PageHighMem(p)))
-		{
-			mempool_free(md, allocator->free_list_highmem_pool);
-		}
-		else if (!(flags & KBASE_REG_MUST_ZERO))
-		{
-			flush_dcache_page(p);
-		}
-
 		if (flags & KBASE_REG_MUST_ZERO)
 		{
 			mp = kmap(p);
 			if (NULL == mp)
 			{
 				/* free the current page */
-				__free_page(p);
+				kbase_carveout_put_page(p);
 				/* put the rest back on the free list */
 				mutex_lock(&allocator->free_list_lock);
 				list_splice(&from_free_list, &allocator->free_list_head);
@@ -206,7 +268,7 @@ mali_error kbase_mem_allocator_alloc(kbase_mem_allocator *allocator, u32 nr_page
 
 	for (; i < nr_pages; i++)
 	{
-		p = alloc_page(GFP_HIGHUSER);
+		p = kbase_carveout_get_page();
 		if (NULL == p)
 		{
 			goto err_out_roll_back;
@@ -215,7 +277,7 @@ mali_error kbase_mem_allocator_alloc(kbase_mem_allocator *allocator, u32 nr_page
 		mp = kmap(p);
 		if (NULL == mp)
 		{
-			__free_page(p);
+			kbase_carveout_put_page(p);
 			goto err_out_roll_back;
 		}
 		memset(mp, 0x00, PAGE_SIZE); /* instead of __GFP_ZERO, so we can do cache maintenance */
@@ -232,7 +294,7 @@ err_out_roll_back:
 		struct page * p;
 		p = pfn_to_page(PFN_DOWN(pages[i]));
 		pages[i] = (osk_phy_addr)0;
-		__free_page(p);
+		kbase_carveout_put_page(p);
 	}
 	return MALI_ERROR_OUT_OF_MEMORY;
 }
@@ -261,7 +323,7 @@ void kbase_mem_allocator_free(kbase_mem_allocator *allocator, u32 nr_pages, osk_
 			struct page * p;
 			p = pfn_to_page(PFN_DOWN(pages[i]));
 			pages[i] = (osk_phy_addr)0;
-			__free_page(p);
+			kbase_carveout_put_page(p);
 		}
 	}
 
@@ -269,31 +331,11 @@ void kbase_mem_allocator_free(kbase_mem_allocator *allocator, u32 nr_pages, osk_
 	{
 		if (likely(0 != pages[i]))
 		{
-			struct kbase_page_metadata * md;
 			struct page * p;
 
 			p = pfn_to_page(PFN_DOWN(pages[i]));
 			pages[i] = (osk_phy_addr)0;
-
-			if (likely(PageHighMem(p)))
-			{
-				md = mempool_alloc(allocator->free_list_highmem_pool, GFP_KERNEL);
-				if (!md)
-				{
-					/* can't put it on the free list, direct release */
-					__free_page(p);
-					continue;
-				}
-			}
-			else
-			{
-				md = lowmem_page_address(p);
-				BUG_ON(!md);
-			}
-
-			INIT_LIST_HEAD(&md->list);
-			md->page = p;
-			list_add(&md->list, &new_free_list_items);
+			list_add(&p->lru, &new_free_list_items);
 			page_count++;
 		}
 	}
@@ -1297,6 +1339,7 @@ mali_error kbase_cpu_free_mapping(struct kbase_va_region *reg, const void *ptr)
 {
 	struct kbase_cpu_mapping *map;
 	mali_error err = MALI_ERROR_NONE;
+	int err_dummy;
 	OSK_ASSERT(NULL != reg);
 	map = kbase_find_cpu_mapping(reg, ptr);
 	if (!map)
@@ -1313,7 +1356,7 @@ mali_error kbase_cpu_free_mapping(struct kbase_va_region *reg, const void *ptr)
 		kbase_process_page_usage_inc(reg->kctx, map->nr_pages);
 	}
 
-	OSK_DLIST_REMOVE(&reg->map_list, map, link);
+	OSK_DLIST_REMOVE(&reg->map_list, map, link, err_dummy);
 	kfree(map);
 
 	if ((reg->flags & KBASE_REG_DELAYED_FREE) && OSK_DLIST_IS_EMPTY(&reg->map_list))
@@ -1788,7 +1831,7 @@ void kbase_free_phy_pages(struct kbase_va_region *reg)
 			kbase_device_trace_buffer_uninstall(reg->kctx);
 			vfree(tb);
 		}
-		else if (reg->flags & KBASE_REG_IS_RB)
+		else if (reg->flags & (KBASE_REG_IS_RB | KBASE_REG_IS_MMU_DUMP))
 		{
 			/* nothing to do */
 		}
