@@ -21,7 +21,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: wl_cfg80211.h 401050 2013-05-08 13:36:28Z $
+ * $Id: wl_cfg80211.h 401713 2013-05-13 12:11:03Z $
  */
 
 #ifndef _wl_cfg80211_h_
@@ -156,7 +156,7 @@ do {									\
 #define WL_SCAN_JOIN_PASSIVE_DWELL_TIME_MS 	400
 #define WL_AF_TX_MAX_RETRY 	5
 
-#define WL_AF_SEARCH_TIME_MAX           410
+#define WL_AF_SEARCH_TIME_MAX           450
 #define WL_AF_TX_EXTRA_TIME_MAX         200
 
 #define WL_SCAN_TIMER_INTERVAL_MS	8000 /* Scan timeout */
@@ -274,8 +274,8 @@ struct wl_conf {
 	struct ieee80211_channel channel;
 };
 
-typedef s32(*EVENT_HANDLER) (struct wl_priv *wl,
-                            struct net_device *ndev, const wl_event_msg_t *e, void *data);
+typedef s32(*EVENT_HANDLER) (struct wl_priv *wl, bcm_struct_cfgdev *cfgdev,
+                            const wl_event_msg_t *e, void *data);
 
 /* bss inform structure for cfg80211 interface */
 struct wl_cfg80211_bss_info {
@@ -487,6 +487,7 @@ struct wl_priv {
 	struct wireless_dev *wdev;	/* representing wl cfg80211 device */
 
 	struct wireless_dev *p2p_wdev;	/* representing wl cfg80211 device for P2P */
+
 	struct net_device *p2p_net;    /* reference to p2p0 interface */
 
 	struct wl_conf *conf;
@@ -777,6 +778,30 @@ wl_get_netinfo_by_netdev(struct wl_priv *wl, struct net_device *ndev)
 #define ndev_to_wl(n) (wdev_to_wl(n->ieee80211_ptr))
 #define ndev_to_wdev(ndev) (ndev->ieee80211_ptr)
 #define wdev_to_ndev(wdev) (wdev->netdev)
+
+#if defined(WL_ENABLE_P2P_IF)
+#define ndev_to_wlc_ndev(ndev, wl)	((ndev == wl->p2p_net) ? \
+	wl_to_prmry_ndev(wl) : ndev)
+#else
+#define ndev_to_wlc_ndev(ndev, wl)	(ndev)
+#endif /* WL_ENABLE_P2P_IF */
+
+#if defined(WL_ENABLE_P2P_IF)
+#define cfgdev_to_wlc_ndev(cfgdev, wl)	ndev_to_wlc_ndev(cfgdev, wl)
+#else
+#define cfgdev_to_wlc_ndev(cfgdev, wl)	(cfgdev)
+#endif 
+
+#define ndev_to_cfgdev(ndev)	(ndev)
+
+#if defined(WL_ENABLE_P2P_IF)
+#define scan_req_match(wl)	(((wl) && (wl->scan_request) && \
+	(wl->scan_request->dev == wl->p2p_net)) ? true : false)
+#else
+#define scan_req_match(wl)	(((wl) && p2p_is_on(wl) && p2p_scan(wl)) ? \
+	true : false)
+#endif 
+
 #define wl_to_sr(w) (w->scan_req_int)
 #if defined(STATIC_WL_PRIV_STRUCT)
 #define wl_to_ie(w) (w->ie)
@@ -864,9 +889,6 @@ extern chanspec_t wl_ch_host_to_driver(u16 channel);
 extern s32 wl_add_remove_eventmsg(struct net_device *ndev, u16 event, bool add);
 extern void wl_stop_wait_next_action_frame(struct wl_priv *wl);
 extern int wl_cfg80211_update_power_mode(struct net_device *dev);
-#if defined(DHCP_SCAN_SUPPRESS)
-extern int wl_cfg80211_scan_suppress(struct net_device *dev, int suppress);
-#endif
 extern void wl_cfg80211_add_to_eventbuffer(wl_eventmsg_buf_t *ev, u16 event, bool set);
 extern s32 wl_cfg80211_apply_eventbuffer(struct net_device *ndev,
 	struct wl_priv *wl, wl_eventmsg_buf_t *ev);
