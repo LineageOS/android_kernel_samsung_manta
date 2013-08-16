@@ -75,6 +75,9 @@ MODULE_DESCRIPTION("USB Audio");
 MODULE_LICENSE("GPL");
 MODULE_SUPPORTED_DEVICE("{{Generic,USB Audio}}");
 
+#ifdef CONFIG_MACH_MANTA
+extern void dock_set_audio_switch(int state);
+#endif
 
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
@@ -281,6 +284,9 @@ static int snd_usb_create_streams(struct snd_usb_audio *chip, int ctrlif)
 		break;
 	}
 	}
+#ifdef CONFIG_MACH_MANTA
+	dock_set_audio_switch(1);
+#endif
 
 	return 0;
 }
@@ -599,6 +605,9 @@ static void snd_usb_audio_disconnect(struct usb_device *dev,
 	} else {
 		mutex_unlock(&register_mutex);
 	}
+#ifdef CONFIG_MACH_MANTA
+	dock_set_audio_switch(0);
+#endif
 }
 
 /*

@@ -57,6 +57,7 @@
 
 /* states for usb_audio */
 #define POGO_NO_AUDIO			0
+#define POGO_ANALOG_AUDIO		1
 #define POGO_DIGITAL_AUDIO		2
 
 #define DOCK_STAT_POWER_MASK		3
@@ -511,19 +512,18 @@ static void dock_spdif_switch_set(bool spdif_mode)
 	}
 }
 
-static void dock_set_audio_switch(bool audio_on)
+void dock_set_audio_switch(int state)
 {
 	struct dock_state *s = &ds;
 	unsigned long flags;
 
 	spin_lock_irqsave(&s->wait.lock, flags);
-	dock_spdif_switch_set(audio_on);
-	if (audio_on && s->debounce_state == POGO_DEBOUNCE_UNDOCKED)
+	dock_spdif_switch_set(state == POGO_DIGITAL_AUDIO);
+	if (state > 0 && s->debounce_state == POGO_DEBOUNCE_UNDOCKED)
 		pogo_dock_pd_interrupt_locked(s->dock_pd_irq, s);
 	spin_unlock_irqrestore(&s->wait.lock, flags);
 
-	switch_set_state(&usb_audio_switch, audio_on ?
-			POGO_DIGITAL_AUDIO : POGO_NO_AUDIO);
+	switch_set_state(&usb_audio_switch, state);
 }
 
 int manta_pogo_charge_detect_start(bool spdif_mode_and_gpio_in)
@@ -634,7 +634,7 @@ static int dock_check_status(struct dock_state *s,
 
 	if (s->dock_connected_unknown) {
 		/* force a new dock notification if a command failed */
-		dock_set_audio_switch(false);
+		dock_set_audio_switch(POGO_NO_AUDIO);
 		s->dock_connected_unknown = false;
 	}
 
@@ -644,7 +644,7 @@ static int dock_check_status(struct dock_state *s,
 
 	pr_debug("%s: Dock status %02x\n", __func__, dock_stat);
 	if (dock_stat >= 0) {
-		dock_set_audio_switch(dock_stat & DOCK_STAT_AUDIO_CONNECTED);
+		dock_set_audio_switch(dock_stat & DOCK_STAT_AUDIO_CONNECTED ? POGO_DIGITAL_AUDIO : POGO_NO_AUDIO);
 
 		if (charge_source) {
 			s->powered_dock_present = true;
@@ -672,7 +672,7 @@ static int dock_check_status(struct dock_state *s,
 
 	dock_in();
 	ret = -ENOENT;
-	dock_set_audio_switch(false);
+	dock_set_audio_switch(POGO_NO_AUDIO);
 done:
 	return ret;
 }
@@ -690,7 +690,7 @@ int manta_pogo_set_vbus(bool status, enum manta_charge_source *charge_source)
 		ret = dock_check_status(s, charge_source);
 	} else {
 		dock_in();
-		dock_set_audio_switch(false);
+		dock_set_audio_switch(POGO_NO_AUDIO);
 		s->powered_dock_present = false;
 		s->dock_connected_unknown = false;
 
