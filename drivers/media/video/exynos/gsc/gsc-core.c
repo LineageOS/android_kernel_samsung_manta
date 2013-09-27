@@ -1293,6 +1293,27 @@ static void gsc_pm_runtime_disable(struct device *dev)
 #endif
 }
 
+int gsc_sysmmu_fault_handler(struct device *dev,
+		enum exynos_sysmmu_inttype itype, unsigned long pgtable_base,
+		unsigned long fault_addr)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct gsc_dev *gsc = platform_get_drvdata(pdev);
+
+	pr_err("GSC%u FAULT occurred at 0x%lx (Page table base: 0x%lx, type: %u)\n",
+			gsc->id, fault_addr, pgtable_base, itype);
+
+	pr_err("dumping registers\n");
+	print_hex_dump(KERN_ERR, "", DUMP_PREFIX_ADDRESS, 32, 4, gsc->regs,
+			0x200, false);
+
+	pr_err("Generating Kernel OOPS... because it is unrecoverable.\n");
+
+	BUG();
+
+	return 0;
+}
+
 static int gsc_probe(struct platform_device *pdev)
 {
 	struct gsc_dev *gsc;
@@ -1377,6 +1398,8 @@ static int gsc_probe(struct platform_device *pdev)
 #endif
 
 	platform_set_drvdata(pdev, gsc);
+
+	exynos_sysmmu_set_fault_handler(&pdev->dev, gsc_sysmmu_fault_handler);
 
 	ret = gsc_register_m2m_device(gsc);
 	if (ret)
