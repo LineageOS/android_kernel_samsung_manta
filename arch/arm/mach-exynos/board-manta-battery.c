@@ -70,7 +70,6 @@ static bool manta_bat_chg_enable_synced;
 static struct power_supply *manta_bat_smb347_mains;
 static struct power_supply *manta_bat_smb347_usb;
 static struct power_supply *manta_bat_smb347_battery;
-static struct power_supply *manta_bat_ds2784_battery;
 
 static struct s3c_adc_client *ta_adc_client;
 
@@ -104,21 +103,6 @@ static char *manta_charge_source_str(enum manta_charge_source charge_source)
 	}
 
 	return "?";
-}
-
-static inline int manta_bat_get_ds2784(void)
-{
-	if (!manta_bat_ds2784_battery)
-		manta_bat_ds2784_battery =
-			power_supply_get_by_name("ds2784-fuelgauge");
-
-	if (!manta_bat_ds2784_battery) {
-		pr_err_once("%s: failed to get ds2784-fuelgauge power supply\n",
-			    __func__);
-		return -ENODEV;
-	}
-
-	return 0;
 }
 
 static inline int manta_bat_get_smb347_usb(void)
@@ -838,13 +822,6 @@ static int manta_bat_get_property(struct power_supply *ps,
 	case POWER_SUPPLY_PROP_CHARGE_ENABLED:
 		val->intval = manta_bat_chg_enabled;
 		return 0;
-	case POWER_SUPPLY_PROP_CAPACITY:
-		if (manta_bat_get_ds2784())
-			return -EIO;
-		return manta_bat_ds2784_battery->get_property(
-			manta_bat_ds2784_battery, POWER_SUPPLY_PROP_CAPACITY,
-			val);
-
 	default:
 		return -EINVAL;
 	}
@@ -864,7 +841,6 @@ static int manta_bat_property_is_writeable(struct power_supply *psy,
 }
 static enum power_supply_property manta_battery_props[] = {
 	POWER_SUPPLY_PROP_CHARGE_ENABLED,
-	POWER_SUPPLY_PROP_CAPACITY,
 };
 
 static void manta_bat_power_changed(struct power_supply *psy)
