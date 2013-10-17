@@ -15,6 +15,8 @@
 
 
 
+
+
 /**
  * @file mali_kbase_device.c
  * Base kernel device APIs
@@ -22,10 +24,13 @@
 
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
 
 #include <kbase/src/common/mali_kbase.h>
 #include <kbase/src/common/mali_kbase_defs.h>
 #include <kbase/src/common/mali_kbase_hw.h>
+#include <kbase/src/common/mali_kbase_gator.h>
 
 /* NOTE: Magic - 0x45435254 (TRCE in ASCII).
  * Supports tracing feature provided in the base module.
@@ -179,7 +184,11 @@ mali_error kbase_device_init(kbase_device * const kbdev)
 		atomic_set(&kbdev->timeline.pm_event_uid[i], 0);
 #endif /* CONFIG_MALI_TRACE_TIMELINE */
 
-	kbase_debug_assert_register_hook(&kbasep_trace_hook_wrapper, kbdev);
+	/* fbdump profiling controls set to 0 - fbdump not enabled until changed by gator */
+	for (i = 0; i < BASE_PROFILING_CONTROL_MAX; i++)
+		kbdev->kbase_profiling_controls[i] = 0;
+
+		kbase_debug_assert_register_hook(&kbasep_trace_hook_wrapper, kbdev);
 
 #if defined(CONFIG_MALI_PLATFORM_VEXPRESS) || defined(CONFIG_MALI_PLATFORM_VEXPRESS_VIRTEX7_40MHZ)
 #ifdef CONFIG_MALI_PLATFORM_FAKE
@@ -692,3 +701,61 @@ void kbasep_trace_dump(kbase_device *kbdev)
 	CSTD_UNUSED(kbdev);
 }
 #endif				/* KBASE_TRACE_ENABLE != 0 */
+
+void kbase_set_profiling_control(struct kbase_device *kbdev, u32 control, u32 value)
+{
+	if ((0 > control) || (BASE_PROFILING_CONTROL_MAX <= control)) {
+		KBASE_DEBUG_PRINT_ERROR(KBASE_DEV, "Profiling control %d out of range [0, %d]", control, BASE_PROFILING_CONTROL_MAX - 1);
+		return;
+	}
+
+	kbdev->kbase_profiling_controls[control] = value;
+}
+
+u32 kbase_get_profiling_control(struct kbase_device *kbdev, u32 control)
+{
+	if ((0 > control) || (BASE_PROFILING_CONTROL_MAX <= control)) {
+		KBASE_DEBUG_PRINT_ERROR(KBASE_DEV, "Profiling control %d out of range [0, %d]", control, BASE_PROFILING_CONTROL_MAX - 1);
+		return 0;
+	}
+
+	return kbdev->kbase_profiling_controls[control];
+}
+
+/*
+ * Called by gator to control the production of
+ * profiling information at runtime
+ * */
+
+void _mali_profiling_control(u32 action, u32 value)
+{
+	struct kbase_device *kbdev = NULL;
+
+	/* find the first i.e. call with -1 */
+	kbdev = kbase_find_device(-1);
+
+	if (NULL != kbdev) {
+		switch (action) {
+		case FBDUMP_CONTROL_ENABLE:
+			kbase_set_profiling_control(kbdev, BASE_PROFILING_CONTROL_FBDUMP_CONTROL_ENABLE, \
+				value);
+			break;
+		case FBDUMP_CONTROL_RATE:
+			kbase_set_profiling_control(kbdev, BASE_PROFILING_CONTROL_FBDUMP_CONTROL_RATE, \
+				value);
+			break;
+		case SW_COUNTER_ENABLE:
+			kbase_set_profiling_control(kbdev, BASE_PROFILING_CONTROL_SW_COUNTER_ENABLE, \
+				value);
+			break;
+		case FBDUMP_CONTROL_RESIZE_FACTOR:
+			kbase_set_profiling_control(kbdev, BASE_PROFILING_CONTROL_FBDUMP_CONTROL_RESIZE_FACTOR, \
+				value);
+			break;
+		default:
+			break;
+		}
+	}
+}
+
+KBASE_EXPORT_SYMBOL(_mali_profiling_control);

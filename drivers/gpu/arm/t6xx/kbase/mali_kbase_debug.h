@@ -15,6 +15,8 @@
 
 
 
+
+
 #ifndef _KBASE_DEBUG_H
 #define _KBASE_DEBUG_H
 
@@ -45,6 +47,7 @@ typedef enum {
 	KBASE_EVENT,	   /**< @brief ID of Base Event */
 	KBASE_CTX,	   /**< @brief ID of Base Context */
 	KBASE_PM,	   /**< @brief ID of Base Power Management */
+	KBASE_DEV, /**< @brief ID of Base Device */
 	KBASE_MODULES_ALL  /**< @brief Select all the modules at once / Also gives the number of modules in the enum */
 } kbase_module;
 

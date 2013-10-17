@@ -15,6 +15,8 @@
 
 
 
+
+
 #ifndef _MIDGARD_REGMAP_H_
 #define _MIDGARD_REGMAP_H_
 
@@ -427,6 +429,12 @@
 #define GPU_ID_PI_T65X                    0x3456
 #define GPU_ID_PI_T62X                    0x0620
 #define GPU_ID_PI_T67X                    0x0670
+#ifdef MALI_INCLUDE_SKRYMIR
+#define GPU_ID_PI_T76X                    0x0750
+#endif /* MALI_INCLUDE_SKRYMIR */
+#ifdef MALI_INCLUDE_SKADI
+#define GPU_ID_PI_T72X                    0x0720
+#endif /* MALI_INCLUDE_SKADI */
 
 /* Values for GPU_ID_VERSION_STATUS field for PRODUCT_ID GPU_ID_PI_T60X and GPU_ID_PI_T65X */
 #define GPU_ID_S_15DEV0                   0x1
@@ -490,9 +498,10 @@
 /* SHADER_CONFIG register */
 
 #define SC_ALT_COUNTERS             (1ul << 3)
+#define SC_OVERRIDE_FWD_PIXEL_KILL  (1ul << 4)
 #define SC_SDC_DISABLE_OQ_DISCARD   (1ul << 6)
 #define SC_LS_PAUSEBUFFER_DISABLE   (1ul << 16)
-
+#define SC_ENABLE_TEXGRD_FLAGS      (1ul << 25)
 /* End SHADER_CONFIG register */
 
 #endif				/* _MIDGARD_REGMAP_H_ */

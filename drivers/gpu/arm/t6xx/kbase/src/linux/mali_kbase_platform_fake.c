@@ -13,6 +13,8 @@
  *
  */
 
+
+
 #ifdef CONFIG_MALI_PLATFORM_FAKE
 
 #include <linux/errno.h>
@@ -38,16 +40,7 @@
 
 static struct platform_device *mali_device;
 
-/**
- * @brief Gets the count of attributes in array
- *
- * Function gets the count of attributes in array. Note that end of list indicator is also included.
- *
- * @param[in]  attributes     Array of attributes
- *
- * @return  Number of attributes in the array including end of list indicator.
- */
-static int kbasep_get_config_attribute_count(const kbase_attribute *attributes)
+int kbasep_get_config_attribute_count(const kbase_attribute *attributes)
 {
 	int count = 1;
 
@@ -62,6 +55,7 @@ static int kbasep_get_config_attribute_count(const kbase_attribute *attributes)
 	return count;
 }
 
+#ifndef CONFIG_OF
 /**
  * @brief Convert data in kbase_io_resources struct to Linux-specific resources
  *
@@ -94,12 +88,15 @@ static void kbasep_config_parse_io_resources(const kbase_io_resources *io_resour
 	linux_resources[3].start = linux_resources[3].end = io_resources->gpu_irq_number;
 	linux_resources[3].flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHLEVEL;
 }
+#endif /* CONFIG_OF */
 
 int kbase_platform_fake_register(void)
 {
 	kbase_platform_config *config;
 	int attribute_count;
+#ifndef CONFIG_OF
 	struct resource resources[PLATFORM_CONFIG_RESOURCE_COUNT];
+#endif
 	int err;
 
 	config = kbase_get_platform_config(); /* declared in kbase/mali_kbase_config.h but defined in platform folder */
@@ -120,6 +117,7 @@ int kbase_platform_fake_register(void)
 	if (mali_device == NULL)
 		return -ENOMEM;
 
+#ifndef CONFIG_OF
 	kbasep_config_parse_io_resources(config->io_resources, resources);
 	err = platform_device_add_resources(mali_device, resources, PLATFORM_CONFIG_RESOURCE_COUNT);
 	if (err) {
@@ -127,6 +125,7 @@ int kbase_platform_fake_register(void)
 		mali_device = NULL;
 		return err;
 	}
+#endif /* CONFIG_OF */
 
 	err = platform_device_add_data(mali_device, config->attributes, attribute_count * sizeof(config->attributes[0]));
 	if (err) {
