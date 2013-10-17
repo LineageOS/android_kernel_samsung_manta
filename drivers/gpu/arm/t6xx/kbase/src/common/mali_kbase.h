@@ -15,6 +15,8 @@
 
 
 
+
+
 #ifndef _KBASE_H_
 #define _KBASE_H_
 
@@ -76,6 +78,10 @@ void kbase_device_free(kbase_device *kbdev);
 int kbase_device_has_feature(kbase_device *kbdev, u32 feature);
 kbase_midgard_type kbase_device_get_type(kbase_device *kbdev);
 struct kbase_device *kbase_find_device(int minor);	/* Only needed for gator integration */
+
+void kbase_set_profiling_control(struct kbase_device *kbdev, u32 control, u32 value);
+
+u32 kbase_get_profiling_control(struct kbase_device *kbdev, u32 control);
 
 /**
  * Ensure that all IRQ handlers have completed execution

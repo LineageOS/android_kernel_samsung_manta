@@ -15,6 +15,8 @@
 
 
 
+
+
 /**
  * @file mali_kbase_mem.c
  * Base kernel memory APIs
@@ -184,9 +186,10 @@ void kbase_mem_allocator_free(kbase_mem_allocator *allocator, u32 nr_pages, phys
 	/* Starting by just freeing the overspill.
 	* As we do this outside of the lock we might spill too many pages
 	* or get too many on the free list, but the max_size is just a ballpark so it is ok
+	* providing that tofree doesn't exceed nr_pages
 	*/
-	tofree = atomic_read(&allocator->free_list_size) + nr_pages - allocator->free_list_max_size;
-	/* if tofree became negative this first for loop will be ignored */
+	tofree = MAX((int)allocator->free_list_max_size - atomic_read(&allocator->free_list_size),0);
+	tofree = nr_pages - MIN(tofree, nr_pages);
 	for (; i < tofree; i++)
 	{
 		if (likely(0 != pages[i]))

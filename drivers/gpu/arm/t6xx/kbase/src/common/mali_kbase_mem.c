@@ -15,6 +15,8 @@
 
 
 
+
+
 /**
  * @file mali_kbase_mem.c
  * Base kernel memory APIs
@@ -884,15 +886,16 @@ static mali_error kbase_do_syncset(kbase_context *kctx, struct base_syncset *set
 	struct basep_syncset *sset = &set->basep_sset;
 	struct kbase_va_region *reg;
 	struct kbase_cpu_mapping *map;
-	phys_addr_t *pa;
-	u64 page_off, page_count;
 	void *start;
 	size_t size;
+	phys_addr_t base_phy_addr = 0;
+	phys_addr_t *pa;
+	u64 page_off, page_count;
 	u64 i;
 	u32 offset_within_page;
-	phys_addr_t base_phy_addr = 0;
 	void *base_virt_addr = 0;
 	size_t area_size = 0;
+
 
 	kbase_os_mem_map_lock(kctx);
 
@@ -917,41 +920,38 @@ static mali_error kbase_do_syncset(kbase_context *kctx, struct base_syncset *set
 		goto out_unlock;
 	}
 
-	#ifndef CONFIG_OUTER_CACHE
-		sync_fn(base_phy_addr, start, size);
-	#else
-		offset_within_page = (uintptr_t) start & (PAGE_SIZE - 1);
-		page_off = map->page_off + (((uintptr_t) start - (uintptr_t) map->uaddr) >> PAGE_SHIFT);
-		page_count = ((size + offset_within_page + (PAGE_SIZE - 1)) & PAGE_MASK) >> PAGE_SHIFT;
-		pa = kbase_get_phy_pages(reg);
+	offset_within_page = (uintptr_t) start & (PAGE_SIZE - 1);
+	page_off = map->page_off + (((uintptr_t) start - (uintptr_t) map->uaddr) >> PAGE_SHIFT);
+	page_count = ((size + offset_within_page + (PAGE_SIZE - 1)) & PAGE_MASK) >> PAGE_SHIFT;
+	pa = kbase_get_phy_pages(reg);
 
-		for (i = 0; i < page_count; i++) {
-			u32 offset = (uintptr_t) start & (PAGE_SIZE - 1);
-			phys_addr_t paddr = pa[page_off + i] + offset;
-			size_t sz = MIN(((size_t) PAGE_SIZE - offset), size);
+	for (i = 0; i < page_count; i++) {
+		u32 offset = (uintptr_t) start & (PAGE_SIZE - 1);
+		phys_addr_t paddr = pa[page_off + i] + offset;
+		size_t sz = MIN(((size_t) PAGE_SIZE - offset), size);
 
-			if (paddr == base_phy_addr + area_size && start == (void *)((uintptr_t) base_virt_addr + area_size)) {
-				area_size += sz;
-			} else if (area_size > 0) {
-				sync_fn(base_phy_addr, base_virt_addr, area_size);
-				area_size = 0;
-			}
-
-			if (area_size == 0) {
-				base_phy_addr = paddr;
-				base_virt_addr = start;
-				area_size = sz;
-			}
-
-			start = (void *)((uintptr_t) start + sz);
-			size -= sz;
+		if (paddr == base_phy_addr + area_size && start == (void *)((uintptr_t) base_virt_addr + area_size)) {
+			area_size += sz;
+		} else if (area_size > 0) {
+			sync_fn(base_phy_addr, base_virt_addr, area_size);
+			area_size = 0;
 		}
 
-		if (area_size > 0)
-			sync_fn(base_phy_addr, base_virt_addr, area_size);
+		if (area_size == 0) {
+			base_phy_addr = paddr;
+			base_virt_addr = start;
+			area_size = sz;
+		}
 
-		KBASE_DEBUG_ASSERT(size == 0);
-	#endif /* CONFIG_OUTER_CACHE */
+		start = (void *)((uintptr_t) start + sz);
+		size -= sz;
+	}
+
+	if (area_size > 0)
+		sync_fn(base_phy_addr, base_virt_addr, area_size);
+
+	KBASE_DEBUG_ASSERT(size == 0);
+
 
  out_unlock:
 	kbase_gpu_vm_unlock(kctx);

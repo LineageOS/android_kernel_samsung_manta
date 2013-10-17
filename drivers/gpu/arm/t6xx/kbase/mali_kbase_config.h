@@ -15,6 +15,8 @@
 
 
 
+
+
 /**
  * @file mali_kbase_config.h
  * Configuration API and Attributes for KBase
@@ -729,6 +731,12 @@ typedef int (*kbase_cpuprops_clock_speed_function) (u32 *clock_speed);
  */
 typedef int (*kbase_gpuprops_clock_speed_function) (u32 *clock_speed);
 
+#ifdef CONFIG_OF
+typedef struct kbase_platform_config {
+	const kbase_attribute *attributes;
+	u32 midgard_type;
+} kbase_platform_config;
+#else
 #ifdef CONFIG_MALI_PLATFORM_FAKE
 /*
  * @brief Specifies start and end of I/O memory region.
@@ -753,8 +761,9 @@ typedef struct kbase_platform_config {
 	const kbase_io_resources *io_resources;
 	u32 midgard_type;
 } kbase_platform_config;
-
 #endif				/* CONFIG_MALI_PLATFORM_FAKE */
+#endif /* CONFIG_OF */
+
 /**
  * @brief Return character string associated with the given midgard type.
  *
@@ -812,6 +821,17 @@ mali_bool kbasep_validate_configuration_attributes(struct kbase_device *kbdev, c
  * @return Pointer to the platform config
  */
 kbase_platform_config *kbase_get_platform_config(void);
+
+/**
+ * @brief Gets the count of attributes in array
+ *
+ * Function gets the count of attributes in array. Note that end of list indicator is also included.
+ *
+ * @param[in]  attributes     Array of attributes
+ *
+ * @return  Number of attributes in the array including end of list indicator.
+ */
+int kbasep_get_config_attribute_count(const kbase_attribute *attributes);
 #endif				/* CONFIG_MALI_PLATFORM_FAKE */
 
 /**

@@ -15,6 +15,8 @@
 
 
 
+
+
 /*
  * Job Scheduler Implementation
  */
@@ -157,10 +159,12 @@ STATIC INLINE void runpool_inc_context_count(kbase_device *kbdev, kbase_context 
 	BUG_ON(!mutex_is_locked(&js_devdata->runpool_mutex));
 
 	/* Track total contexts */
+	KBASE_DEBUG_ASSERT(js_devdata->nr_all_contexts_running < S8_MAX);
 	++(js_devdata->nr_all_contexts_running);
 
 	if ((js_kctx_info->ctx.flags & KBASE_CTX_FLAG_SUBMIT_DISABLED) == 0) {
 		/* Track contexts that can submit jobs */
+		KBASE_DEBUG_ASSERT(js_devdata->nr_user_contexts_running < S8_MAX);
 		++(js_devdata->nr_user_contexts_running);
 	}
 }
@@ -185,10 +189,12 @@ STATIC INLINE void runpool_dec_context_count(kbase_device *kbdev, kbase_context 
 
 	/* Track total contexts */
 	--(js_devdata->nr_all_contexts_running);
+	KBASE_DEBUG_ASSERT(js_devdata->nr_all_contexts_running >= 0);
 
 	if ((js_kctx_info->ctx.flags & KBASE_CTX_FLAG_SUBMIT_DISABLED) == 0) {
 		/* Track contexts that can submit jobs */
 		--(js_devdata->nr_user_contexts_running);
+		KBASE_DEBUG_ASSERT(js_devdata->nr_user_contexts_running >= 0);
 	}
 }
 

@@ -15,6 +15,8 @@
 
 
 
+
+
 /**
  * @file mali_kbase_core_linux.c
  * Base kernel driver init.
@@ -23,6 +25,7 @@
 #include <kbase/src/common/mali_kbase.h>
 #include <kbase/src/common/mali_kbase_uku.h>
 #include <kbase/src/common/mali_midg_regmap.h>
+#include <kbase/src/common/mali_kbase_gator.h>
 #include <kbase/src/linux/mali_kbase_mem_linux.h>
 #ifdef CONFIG_MALI_NO_MALI
 #include "mali_kbase_model_linux.h"
@@ -39,6 +42,7 @@
 #include <linux/poll.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/miscdevice.h>
 #include <linux/list.h>
@@ -52,6 +56,14 @@
 #ifdef CONFIG_SYNC
 #include <kbase/src/linux/mali_kbase_sync.h>
 #endif /* CONFIG_SYNC */
+
+/* 
+ * This file is included since when we support device tree we don't
+ * use the platform fake code for registering the kbase config attributes.
+ */
+#ifdef CONFIG_OF
+#include <kbase/mali_kbase_config.h>
+#endif
 
 #ifdef CONFIG_MACH_MANTA
 #include <plat/devs.h>
@@ -763,6 +775,41 @@ static mali_error kbase_dispatch(kbase_context *kctx, void * const args, u32 arg
 
 			break;
 		}
+
+	case KBASE_FUNC_GET_PROFILING_CONTROLS :
+		{
+			struct kbase_uk_profiling_controls *controls = \
+					(struct kbase_uk_profiling_controls *)args;
+			u32 i;
+
+			if (sizeof(*controls) != args_size)
+				goto bad_size;
+
+			for (i = 0; i < BASE_PROFILING_CONTROL_MAX; i++) {
+				controls->profiling_controls[i] = kbase_get_profiling_control(kbdev, i);
+			}
+
+			break;
+		}
+
+	/* used only for testing purposes; these controls are to be set by gator through gator API */
+	case KBASE_FUNC_SET_PROFILING_CONTROLS :
+		{
+			struct kbase_uk_profiling_controls *controls = \
+					(struct kbase_uk_profiling_controls *)args;
+			u32 i;
+
+			if (sizeof(*controls) != args_size)
+				goto bad_size;
+
+			for (i = 0; i < BASE_PROFILING_CONTROL_MAX; i++)
+			{
+				_mali_profiling_control(i, controls->profiling_controls[i]);
+			}
+
+			break;
+		}
+
 	default:
 		dev_err(kbdev->osdev.dev, "unknown ioctl %u", id);
 		goto out_bad;
@@ -1418,7 +1465,7 @@ static ssize_t show_gpu_memory(struct device *dev, struct device_attribute *attr
 	ssize_t ret = 0;
 	struct list_head *entry;
 
-	ret += scnprintf(buf + ret, PAGE_SIZE - ret, "Name                 pid  cap(pages) usage(pages) unmapped(pages)\n" "=================================================================\n");
+	ret += scnprintf(buf + ret, PAGE_SIZE - ret, "Name              cap(pages) usage(pages)\n" "=========================================\n");
 	down(&kbase_dev_list_lock);
 	list_for_each(entry, &kbase_dev_list) {
 		struct kbase_device *kbdev = NULL;
@@ -1426,30 +1473,13 @@ static ssize_t show_gpu_memory(struct device *dev, struct device_attribute *attr
 
 		kbdev = list_entry(entry, struct kbase_device, osdev.entry);
 		/* output the total memory usage and cap for this device */
-		ret += scnprintf(buf + ret, PAGE_SIZE - ret, "%-16s           %8u   %8u\n",
-			kbdev->osdev.devname, kbdev->memdev.usage.max_pages,
-			atomic_read(&(kbdev->memdev.usage.cur_pages)));
+		ret += scnprintf(buf + ret, PAGE_SIZE - ret, "%-16s  %10u   %10u\n", kbdev->osdev.devname, kbdev->memdev.usage.max_pages, atomic_read(&(kbdev->memdev.usage.cur_pages))
+		    );
 		mutex_lock(&kbdev->kctx_list_lock);
 		list_for_each_entry(element, &kbdev->kctx_list, link) {
-			struct pid *pid;
-			struct task_struct *tsk = NULL;
-
-			pid = find_get_pid(element->kctx->pid);
-			if (pid)
-				tsk = get_pid_task(pid, PIDTYPE_PID);
-
 			/* output the memory usage and cap for each kctx opened on this device */
-			ret += scnprintf(buf + ret, PAGE_SIZE - ret,
-				"  %-16s %5u   %8u   %8u   %8u\n",
-				tsk ? tsk->comm : "", element->kctx->pid,
-				element->kctx->usage.max_pages,
-				atomic_read(&(element->kctx->usage.cur_pages)),
-				atomic_read(&(element->kctx->nonmapped_pages)));
-
-			if (tsk)
-				put_task_struct(tsk);
-			if (pid)
-				put_pid(pid);
+			ret += scnprintf(buf + ret, PAGE_SIZE - ret, "  %s-0x%p %10u   %10u\n", "kctx", element->kctx, element->kctx->usage.max_pages, atomic_read(&(element->kctx->usage.cur_pages))
+			    );
 		}
 		mutex_unlock(&kbdev->kctx_list_lock);
 	}
@@ -2466,6 +2496,20 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 #ifdef CONFIG_MALI_NO_MALI
 	mali_error mali_err;
 #endif /* CONFIG_MALI_NO_MALI */
+#ifdef CONFIG_OF
+	kbase_platform_config *config;
+	int attribute_count;
+
+#ifdef CONFIG_MALI_PLATFORM_FAKE
+	config = kbase_get_platform_config();
+	attribute_count = kbasep_get_config_attribute_count(config->attributes);
+
+	err = platform_device_add_data(pdev, config->attributes,
+			attribute_count * sizeof(config->attributes[0]));
+	if (err)
+		return err;
+#endif /* CONFIG_MALI_PLATFORM_FAKE */
+#endif /* CONFIG_OF */
 
 	kbdev = kbase_device_alloc();
 	if (!kbdev) {
@@ -2502,6 +2546,7 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 	/* 3 IRQ resources */
 	for (i = 0; i < 3; i++) {
 		struct resource *irq_res;
+		int irqtag;
 
 		irq_res = platform_get_resource(pdev, IORESOURCE_IRQ, i);
 		if (!irq_res) {
@@ -2510,8 +2555,24 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 			goto out_free_dev;
 		}
 
-		osdev->irqs[i].irq = irq_res->start;
-		osdev->irqs[i].flags = (irq_res->flags & IRQF_TRIGGER_MASK);
+#ifdef CONFIG_OF
+		if (!strcmp(irq_res->name, "JOB"))
+			irqtag = JOB_IRQ_TAG;
+		else if (!strcmp(irq_res->name, "MMU"))
+			irqtag = MMU_IRQ_TAG;
+		else if (!strcmp(irq_res->name, "GPU"))
+			irqtag = GPU_IRQ_TAG;
+		else {
+			dev_err(&pdev->dev, "Invalid irq res name: '%s'\n",
+				irq_res->name);
+			err = -EINVAL;
+			goto out_free_dev;
+		}
+#else
+		irqtag = i;
+#endif /* CONFIG_OF */
+		osdev->irqs[irqtag].irq = irq_res->start;
+		osdev->irqs[irqtag].flags = (irq_res->flags & IRQF_TRIGGER_MASK);
 	}
 
 	/* the first memory resource is the physical address of the GPU registers */
@@ -2585,6 +2646,9 @@ static int kbase_common_device_remove(struct kbase_device *kbdev)
 	device_remove_file(kbdev->osdev.dev, &dev_attr_js_softstop_always);
 	device_remove_file(kbdev->osdev.dev, &dev_attr_debug_command);
 #endif /* CONFIG_MALI_DEBUG */
+#if MALI_CUSTOMER_RELEASE == 0
+	device_remove_file(kbdev->osdev.dev, &dev_attr_js_timeouts);
+#endif /* MALI_CUSTOMER_RELEASE */
 	device_remove_file(kbdev->osdev.dev, &dev_attr_gpu_memory);
 
 #ifdef CONFIG_MALI_DEBUG_SHADER_SPLIT_FS
@@ -2748,6 +2812,14 @@ static const struct dev_pm_ops kbase_pm_ops = {
 #endif /* CONFIG_PM_RUNTIME */
 };
 
+#ifdef CONFIG_OF
+static const struct of_device_id kbase_dt_ids[] = {
+	{ .compatible = "arm,malit6xx" },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, kbase_dt_ids);
+#endif
+
 static struct platform_driver kbase_platform_driver = {
 	.probe = kbase_platform_device_probe,
 	.remove = kbase_platform_device_remove,
@@ -2755,8 +2827,17 @@ static struct platform_driver kbase_platform_driver = {
 		   .name = kbase_drv_name,
 		   .owner = THIS_MODULE,
 		   .pm = &kbase_pm_ops,
-		   },
+		   .of_match_table = of_match_ptr(kbase_dt_ids),
+	},
 };
+
+/*
+ * The driver will not provide a shortcut to create the Mali platform device
+ * anymore when using Device Tree. 
+ */
+#ifdef CONFIG_OF
+module_platform_driver(kbase_platform_driver);
+#else /* CONFIG_MALI_PLATFORM_FAKE */
 
 #ifdef CONFIG_MALI_PLATFORM_FAKE
 #ifndef MALI_PLATFORM_FAKE_MODULE
@@ -2799,6 +2880,8 @@ static void __exit kbase_driver_exit(void)
 
 module_init(kbase_driver_init);
 module_exit(kbase_driver_exit);
+
+#endif /* CONFIG_OF */
 
 MODULE_LICENSE("GPL");
 MODULE_VERSION(MALI_RELEASE_NAME);

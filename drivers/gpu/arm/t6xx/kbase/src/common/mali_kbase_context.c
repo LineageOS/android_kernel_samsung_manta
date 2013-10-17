@@ -15,6 +15,8 @@
 
 
 
+
+
 /**
  * @file mali_kbase_context.c
  * Base kernel context APIs
@@ -54,7 +56,6 @@ kbase_context *kbase_create_context(kbase_device *kbdev)
 	kctx->keep_gpu_powered = MALI_FALSE;
 	spin_lock_init(&kctx->mm_update_lock);
 	kctx->process_mm = NULL;
-	kctx->pid = task_tgid_nr(current);
 	atomic_set(&kctx->nonmapped_pages, 0);
 
 	if (MALI_ERROR_NONE != kbase_mem_allocator_init(&kctx->osalloc, MEMPOOL_PAGES))

@@ -15,6 +15,8 @@
 
 
 
+
+
 /**
  * @file
  * Base structures shared with the kernel.
@@ -1487,8 +1489,14 @@ typedef struct base_cpu_id_props
 	 * CPU revision
 	 */
 	u8 rev;
-
-	u16 padding;
+	
+	/**
+	Validity of CPU id where 0-invalid and
+	1-valid only if ALL the cpu_id props are valid
+        */
+        u8 valid;  
+		
+	u8 padding;
 }base_cpu_id_props;
 
 
@@ -1556,5 +1564,23 @@ typedef struct base_cpu_props {
 /** @} end group basecpuprops */
 
 /** @} end group base_api */
+
+/**
+ * @name UK profiling setting
+ * @brief Enumeration of possible profiling settings
+ * which match settings in the user space
+ * (enum base_profiling_setting)
+ */
+typedef enum base_profiling_control {
+	BASE_PROFILING_CONTROL_FBDUMP_CONTROL_ENABLE = 0,
+	BASE_PROFILING_CONTROL_FBDUMP_CONTROL_RATE,
+	BASE_PROFILING_CONTROL_SW_COUNTER_ENABLE,
+	BASE_PROFILING_CONTROL_FBDUMP_CONTROL_RESIZE_FACTOR,
+	BASE_PROFILING_CONTROL_MAX
+} base_profiling_control;
+
+typedef struct base_profiling_controls {
+	u32 profiling_controls[BASE_PROFILING_CONTROL_MAX];
+} base_profiling_controls;
 
 #endif				/* _BASE_KERNEL_H_ */

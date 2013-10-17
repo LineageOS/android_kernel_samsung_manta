@@ -13,6 +13,8 @@
  *
  */
 
+
+
 /**
  * @file mali_kbase_cpuprops.c
  * Base kernel property query APIs
@@ -54,7 +56,7 @@
 static void kbasep_cpuprops_uk_get_cpu_id_info(kbase_uk_cpuprops * const kbase_props, u32 cpu_val)
 {
 	kbase_props->props.cpu_id.id           = cpu_val;
-
+	kbase_props->props.cpu_id.valid	       = 1;
 	kbase_props->props.cpu_id.rev          = KBASE_CPUPROPS_ID_GET_REV(cpu_val);
 	kbase_props->props.cpu_id.part         = KBASE_CPUPROPS_ID_GET_PART_NR(cpu_val);
 	kbase_props->props.cpu_id.arch         = KBASE_CPUPROPS_ID_GET_ARCH(cpu_val);

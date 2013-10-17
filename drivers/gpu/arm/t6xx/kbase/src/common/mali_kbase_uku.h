@@ -15,6 +15,8 @@
 
 
 
+
+
 #ifndef _KBASE_UKU_H_
 #define _KBASE_UKU_H_
 
@@ -295,6 +297,11 @@ typedef struct kbase_uk_keep_gpu_powered {
 	u32       padding;
 } kbase_uk_keep_gpu_powered;
 
+typedef struct kbase_uk_profiling_controls {
+	uk_header header;
+	u32 profiling_controls[BASE_PROFILING_CONTROL_MAX];
+} kbase_uk_profiling_controls;
+
 typedef enum kbase_uk_function_id {
 	KBASE_FUNC_TMEM_ALLOC = (UK_FUNC_ID + 0),
 	KBASE_FUNC_TMEM_IMPORT,
@@ -333,7 +340,9 @@ typedef enum kbase_uk_function_id {
 	KBASE_FUNC_TMEM_SETSIZE,
 	KBASE_FUNC_TMEM_GETSIZE,
 	KBASE_FUNC_TMEM_SET_ATTRIBUTES,
-	KBASE_FUNC_TMEM_GET_ATTRIBUTES
+	KBASE_FUNC_TMEM_GET_ATTRIBUTES,
+	KBASE_FUNC_GET_PROFILING_CONTROLS,
+	KBASE_FUNC_SET_PROFILING_CONTROLS /* to be used only for testing purposes, otherwise these controls are set through gator API */
 } kbase_uk_function_id;
 
 #endif				/* _KBASE_UKU_H_ */
