@@ -940,7 +940,7 @@ dhd_pno_set_for_ssid(dhd_pub_t *dhd, wlc_ssid_ext_t* ssid_list, int nssid,
 	if (err < 0) {
 		DHD_ERROR(("%s : failed to reinitialize profile (err %d)\n",
 			__FUNCTION__, err));
-		goto exit_no_clear;
+		goto exit;
 	}
 	memset(_chan_list, 0, sizeof(_chan_list));
 	tot_nchan = nchan;
