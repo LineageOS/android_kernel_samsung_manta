@@ -792,7 +792,7 @@ STATIC void kbasep_js_runpool_attempt_fast_start_ctx(kbase_device *kbdev, kbase_
 				if ((kctx_new == NULL) || kbasep_js_policy_ctx_has_priority(js_policy, kctx_evict, kctx_new)) {
 					mali_bool retain_result;
 					kbasep_js_release_result release_result;
-					KBASE_TRACE_ADD(kbdev, JS_FAST_START_EVICTS_CTX, kctx_evict, NULL, 0u, (u32) kctx_new);
+					KBASE_TRACE_ADD(kbdev, JS_FAST_START_EVICTS_CTX, kctx_evict, NULL, 0u, (uintptr_t)kctx_new);
 
 					/* Retain the ctx to work on it - this shouldn't be able to fail */
 					retain_result = kbasep_js_runpool_retain_ctx_nolock(kbdev, kctx_evict);

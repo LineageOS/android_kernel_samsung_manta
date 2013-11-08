@@ -30,7 +30,8 @@
 #include <kbase/src/common/mali_kbase.h>
 #include <kbase/src/common/mali_kbase_defs.h>
 #include <kbase/src/common/mali_kbase_hw.h>
-#include <kbase/src/common/mali_kbase_gator.h>
+
+#include <kbase/src/mali_kbase_profiling_gator_api.h>
 
 /* NOTE: Magic - 0x45435254 (TRCE in ASCII).
  * Supports tracing feature provided in the base module.
@@ -185,7 +186,7 @@ mali_error kbase_device_init(kbase_device * const kbdev)
 #endif /* CONFIG_MALI_TRACE_TIMELINE */
 
 	/* fbdump profiling controls set to 0 - fbdump not enabled until changed by gator */
-	for (i = 0; i < BASE_PROFILING_CONTROL_MAX; i++)
+	for (i = 0; i < FBDUMP_CONTROL_MAX; i++)
 		kbdev->kbase_profiling_controls[i] = 0;
 
 		kbase_debug_assert_register_hook(&kbasep_trace_hook_wrapper, kbdev);
@@ -476,7 +477,7 @@ void kbasep_trace_format_msg(kbase_trace *trace_msg, char *buffer, int len)
 	written += MAX(snprintf(buffer + written, MAX(len - written, 0), ","), 0);
 
 	/* Rest of message */
-	written += MAX(snprintf(buffer + written, MAX(len - written, 0), "0x%.8x", trace_msg->info_val), 0);
+	written += MAX(snprintf(buffer + written, MAX(len - written, 0), "0x%.8lx", trace_msg->info_val), 0);
 
 }
 
@@ -488,7 +489,7 @@ void kbasep_trace_dump_msg(kbase_trace *trace_msg)
 	KBASE_DEBUG_PRINT(KBASE_CORE, "%s", buffer);
 }
 
-void kbasep_trace_add(kbase_device *kbdev, kbase_trace_code code, void *ctx, kbase_jd_atom *katom, u64 gpu_addr, u8 flags, int refcount, int jobslot, u32 info_val)
+void kbasep_trace_add(kbase_device *kbdev, kbase_trace_code code, void *ctx, kbase_jd_atom *katom, u64 gpu_addr, u8 flags, int refcount, int jobslot, unsigned long info_val)
 {
 	unsigned long irqflags;
 	kbase_trace *trace_msg;
@@ -678,7 +679,7 @@ STATIC void kbasep_trace_hook_wrapper(void *param)
 	CSTD_UNUSED(param);
 }
 
-void kbasep_trace_add(kbase_device *kbdev, kbase_trace_code code, void *ctx, kbase_jd_atom *katom, u64 gpu_addr, u8 flags, int refcount, int jobslot, u32 info_val)
+void kbasep_trace_add(kbase_device *kbdev, kbase_trace_code code, void *ctx, kbase_jd_atom *katom, u64 gpu_addr, u8 flags, int refcount, int jobslot, unsigned long info_val)
 {
 	CSTD_UNUSED(kbdev);
 	CSTD_UNUSED(code);
@@ -704,22 +705,42 @@ void kbasep_trace_dump(kbase_device *kbdev)
 
 void kbase_set_profiling_control(struct kbase_device *kbdev, u32 control, u32 value)
 {
-	if ((0 > control) || (BASE_PROFILING_CONTROL_MAX <= control)) {
-		KBASE_DEBUG_PRINT_ERROR(KBASE_DEV, "Profiling control %d out of range [0, %d]", control, BASE_PROFILING_CONTROL_MAX - 1);
-		return;
+	switch (control) {
+	case FBDUMP_CONTROL_ENABLE:
+		/* fall through */
+	case FBDUMP_CONTROL_RATE:
+		/* fall through */
+	case SW_COUNTER_ENABLE:
+		/* fall through */
+	case FBDUMP_CONTROL_RESIZE_FACTOR:
+		kbdev->kbase_profiling_controls[control] = value;
+		break;
+	default:
+		KBASE_DEBUG_PRINT_ERROR(KBASE_DEV, "Profiling control %d not found\n", control);
+		break;
 	}
-
-	kbdev->kbase_profiling_controls[control] = value;
 }
 
 u32 kbase_get_profiling_control(struct kbase_device *kbdev, u32 control)
 {
-	if ((0 > control) || (BASE_PROFILING_CONTROL_MAX <= control)) {
-		KBASE_DEBUG_PRINT_ERROR(KBASE_DEV, "Profiling control %d out of range [0, %d]", control, BASE_PROFILING_CONTROL_MAX - 1);
-		return 0;
+	u32 ret_value = 0;
+
+	switch (control) {
+	case FBDUMP_CONTROL_ENABLE:
+		/* fall through */
+	case FBDUMP_CONTROL_RATE:
+		/* fall through */
+	case SW_COUNTER_ENABLE:
+		/* fall through */
+	case FBDUMP_CONTROL_RESIZE_FACTOR:
+		ret_value = kbdev->kbase_profiling_controls[control];
+		break;
+	default:
+		KBASE_DEBUG_PRINT_ERROR(KBASE_DEV, "Profiling control %d not found\n", control);
+		break;
 	}
 
-	return kbdev->kbase_profiling_controls[control];
+	return ret_value;
 }
 
 /*
@@ -735,26 +756,7 @@ void _mali_profiling_control(u32 action, u32 value)
 	kbdev = kbase_find_device(-1);
 
 	if (NULL != kbdev) {
-		switch (action) {
-		case FBDUMP_CONTROL_ENABLE:
-			kbase_set_profiling_control(kbdev, BASE_PROFILING_CONTROL_FBDUMP_CONTROL_ENABLE, \
-				value);
-			break;
-		case FBDUMP_CONTROL_RATE:
-			kbase_set_profiling_control(kbdev, BASE_PROFILING_CONTROL_FBDUMP_CONTROL_RATE, \
-				value);
-			break;
-		case SW_COUNTER_ENABLE:
-			kbase_set_profiling_control(kbdev, BASE_PROFILING_CONTROL_SW_COUNTER_ENABLE, \
-				value);
-			break;
-		case FBDUMP_CONTROL_RESIZE_FACTOR:
-			kbase_set_profiling_control(kbdev, BASE_PROFILING_CONTROL_FBDUMP_CONTROL_RESIZE_FACTOR, \
-				value);
-			break;
-		default:
-			break;
-		}
+		kbase_set_profiling_control(kbdev, action, value);
 	}
 }
 

@@ -125,8 +125,8 @@ int __init kbase_carveout_mem_reserve(phys_addr_t size)
 		return -ENOMEM;
 	}
 
-	kbase_carveout_start_pfn = page_to_pfn(phys_to_page(mem));
-	kbase_carveout_end_pfn = page_to_pfn(phys_to_page(mem + size - 1));
+	kbase_carveout_start_pfn = PFN_DOWN(mem);
+	kbase_carveout_end_pfn = PFN_DOWN(mem + size - 1);
 	kbase_carveout_pages = kbase_carveout_end_pfn - kbase_carveout_start_pfn + 1;
 
 	return 0;
@@ -203,7 +203,7 @@ void kbase_mem_allocator_term(kbase_mem_allocator *allocator)
 }
 
 
-mali_error kbase_mem_allocator_alloc(kbase_mem_allocator *allocator, u32 nr_pages, phys_addr_t *pages, int flags)
+mali_error kbase_mem_allocator_alloc(kbase_mem_allocator *allocator, size_t nr_pages, phys_addr_t *pages)
 {
 	struct page * p;
 	void * mp;
