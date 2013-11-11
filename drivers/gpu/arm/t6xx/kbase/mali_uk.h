@@ -15,6 +15,8 @@
 
 
 
+
+
 /**
  * @file mali_uk.h
  * Types and definitions that are common across OSs for both the user
@@ -128,6 +130,7 @@ extern "C" {
 		   /**< This field carries the user-side major version on input and the kernel-side major version on output */
 		u16 minor;
 		   /**< This field carries the user-side minor version on input and the kernel-side minor version on output. */
+		u8 padding[4];
 	} uku_version_check_args;
 
 /** @} end group uk_api */

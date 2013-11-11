@@ -15,6 +15,8 @@
 
 
 
+
+
 #include <kbase/src/common/mali_kbase.h>
 
 #ifdef CONFIG_SYNC
@@ -25,7 +27,7 @@
 
 
 /* Mask to check cache alignment of data structures */
-#define KBASE_CACHE_ALIGNMENT_MASK		((1<<CONFIG_ARM_L1_CACHE_SHIFT)-1)
+#define KBASE_CACHE_ALIGNMENT_MASK		((1<<L1_CACHE_SHIFT)-1)
 
 /**
  * @file mali_kbase_softjobs.c
@@ -99,8 +101,8 @@ static int kbase_dump_cpu_gpu_time(kbase_jd_atom *katom)
 	data.system_time = system_time;
 	data.cycle_counter = cycle_counter;
 
-	pfn = jc >> 12;
-	offset = jc & 0xFFF;
+	pfn = jc >> PAGE_SHIFT;
+	offset = jc & ~PAGE_MASK;
 
 	/* Assume this atom will be cancelled until we know otherwise */
 	katom->event_code = BASE_JD_EVENT_JOB_CANCELLED;
@@ -118,10 +120,10 @@ static int kbase_dump_cpu_gpu_time(kbase_jd_atom *katom)
 		return 0;
 	}
 
-	if (!reg->phy_pages)
+	if (!reg->alloc->pages)
 		return 0;
 
-	addr = reg->phy_pages[pfn - reg->start_pfn];
+	addr = reg->alloc->pages[pfn - reg->start_pfn];
 	if (!addr)
 		return 0;
 

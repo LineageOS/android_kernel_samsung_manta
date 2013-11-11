@@ -21,18 +21,14 @@
  * The following numbers are used by gator to control the frame buffer dumping and s/w counter reporting.
  * We cannot use the enums in mali_uk_types.h because they are unknown inside gator.
  */
-
-#define FBDUMP_CONTROL_ENABLE (1)
-#define FBDUMP_CONTROL_RATE (2)
-#define SW_COUNTER_ENABLE (3)
-#define FBDUMP_CONTROL_RESIZE_FACTOR (4)
+#ifndef _KBASE_GATOR_H_
+#define _KBASE_GATOR_H_
 
 #ifdef CONFIG_MALI_GATOR_SUPPORT
 #define GATOR_MAKE_EVENT(type, number) (((type) << 24) | ((number) << 16))
 #define GATOR_JOB_SLOT_START 1
 #define GATOR_JOB_SLOT_STOP  2
 #define GATOR_JOB_SLOT_SOFT_STOPPED  3
-
 
 void kbase_trace_mali_job_slots_event(u32 event, const kbase_context *kctx);
 void kbase_trace_mali_pm_status(u32 event, u64 value);
@@ -45,4 +41,4 @@ void kbase_trace_mali_total_alloc_pages_change(long long int event);
 
 #endif /* CONFIG_MALI_GATOR_SUPPORT */
 
-void _mali_profiling_control(u32 action, u32 value);
+#endif  /* _KBASE_GATOR_H_ */

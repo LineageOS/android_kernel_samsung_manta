@@ -1,3 +1,4 @@
+
 /*
  *
  * (C) COPYRIGHT 2010-2013 ARM Limited. All rights reserved.
@@ -164,10 +165,13 @@ mali_error kbasep_kds_allocate_resource_list_data(kbase_context *kctx, base_exte
 		if (NULL == reg)
 			break;
 
-		switch (reg->imported_type) {
+		/* no need to check reg->alloc as only regions with an alloc has
+		 * a size, and kbase_region_tracker_find_region_enclosing_address
+		 * only returns regions with size > 0 */
+		switch (reg->alloc->type) {
 #if defined(CONFIG_UMP) && defined(CONFIG_KDS)
-		case BASE_TMEM_IMPORT_TYPE_UMP:
-			kds_res = ump_dd_kds_resource_get(reg->imported_metadata.ump_handle);
+		case KBASE_MEM_TYPE_IMPORTED_UMP:
+			kds_res = ump_dd_kds_resource_get(reg->alloc->imported.ump_handle);
 			break;
 #endif /* defined(CONFIG_UMP) && defined(CONFIG_KDS) */
 		default:
@@ -235,8 +239,8 @@ mali_error kbase_external_buffer_lock(kbase_context *kctx, kbase_uk_ext_buff_kds
 		int *__user file_descriptor_user;
 #ifdef CONFIG_COMPAT
 		if (is_compat_task()) {
-			ext_res_user = args->external_resource.compat_value;
-			file_descriptor_user = args->file_descriptor.compat_value;
+			ext_res_user = compat_ptr(args->external_resource.compat_value);
+			file_descriptor_user = compat_ptr(args->file_descriptor.compat_value);
 		} else {
 #endif /* CONFIG_COMPAT */
 			ext_res_user = args->external_resource.value;
@@ -367,49 +371,39 @@ static mali_error kbase_dispatch(kbase_context *kctx, void * const args, u32 arg
 
 	/* setup complete, perform normal operation */
 	switch (id) {
-	case KBASE_FUNC_TMEM_ALLOC:
+	case KBASE_FUNC_MEM_ALLOC:
 		{
-			kbase_uk_tmem_alloc *tmem = args;
+			kbase_uk_mem_alloc *mem = args;
 			struct kbase_va_region *reg;
 
-			if (sizeof(*tmem) != args_size)
+			if (sizeof(*mem) != args_size)
 				goto bad_size;
 
-			reg = kbase_tmem_alloc(kctx, tmem->vsize, tmem->psize, tmem->extent, tmem->flags, tmem->is_growable);
-			if (reg)
-				tmem->gpu_addr = reg->start_pfn << PAGE_SHIFT;
-			else
+			reg = kbase_mem_alloc(kctx, mem->va_pages, mem->commit_pages, mem->extent, &mem->flags, &mem->gpu_va, &mem->va_alignment);
+			if (!reg)
 				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
 			break;
 		}
-
-	case KBASE_FUNC_TMEM_IMPORT:
+	case KBASE_FUNC_MEM_IMPORT:
 		{
-			kbase_uk_tmem_import *tmem_import = args;
-			struct kbase_va_region *reg;
+			kbase_uk_mem_import *mem_import = args;
 			int *__user phandle;
 			int handle;
 
-			if (sizeof(*tmem_import) != args_size)
+			if (sizeof(*mem_import) != args_size)
 				goto bad_size;
-#ifdef CONFIG_COMPAT
-			if (is_compat_task()) {
-				phandle = tmem_import->phandle.compat_value;
-			} else {
-#endif /* CONFIG_COMPAT */
-				phandle = tmem_import->phandle.value;
-#ifdef CONFIG_COMPAT
-			}
-#endif /* CONFIG_COMPAT */
+#ifdef CONFIG_64BIT
+			if (is_compat_task())
+				phandle = compat_ptr(mem_import->phandle.compat_value);
+			else
+#endif
+				phandle = mem_import->phandle.value;
 
-			/* code should be in kbase_tmem_import and its helpers, but uk dropped its get_user abstraction */
-			switch (tmem_import->type) {
-#ifdef CONFIG_UMP
-			case BASE_TMEM_IMPORT_TYPE_UMP:
+			switch (mem_import->type) {
+			case BASE_MEM_IMPORT_TYPE_UMP:
 				get_user(handle, phandle);
 				break;
-#endif /* CONFIG_UMP */
-			case BASE_TMEM_IMPORT_TYPE_UMM:
+			case BASE_MEM_IMPORT_TYPE_UMM:
 				get_user(handle, phandle);
 				break;
 			default:
@@ -417,30 +411,71 @@ static mali_error kbase_dispatch(kbase_context *kctx, void * const args, u32 arg
 				break;
 			}
 
-			reg = kbase_tmem_import(kctx, tmem_import->type, handle, &tmem_import->pages);
-
-			if (reg) {
-				tmem_import->gpu_addr = reg->start_pfn << PAGE_SHIFT;
-			} else {
- bad_type:
+			if (kbase_mem_import(kctx, mem_import->type, handle, &mem_import->gpu_va, &mem_import->va_pages, &mem_import->flags)) {
+bad_type:
 				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
 			}
 			break;
 		}
-	case KBASE_FUNC_PMEM_ALLOC:
+	case KBASE_FUNC_MEM_COMMIT:
 		{
-			kbase_uk_pmem_alloc *pmem = args;
-			struct kbase_va_region *reg;
+			kbase_uk_mem_commit *commit = args;
 
-			if (sizeof(*pmem) != args_size)
+			if (sizeof(*commit) != args_size)
 				goto bad_size;
 
-			reg = kbase_pmem_alloc(kctx, pmem->vsize, pmem->flags, &pmem->cookie);
-			if (!reg)
+			if (commit->gpu_addr & ~PAGE_MASK) {
+				KBASE_DEBUG_PRINT_WARN(KBASE_MEM, "kbase_dispatch case KBASE_FUNC_MEM_COMMIT: commit->gpu_addr: passed parameter is invalid");
+				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
+				break;
+			}
+
+			if (kbase_mem_commit(kctx, commit->gpu_addr, commit->pages, (base_backing_threshold_status*)&commit->result_subcode))
 				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
 			break;
 		}
 
+	case KBASE_FUNC_MEM_QUERY:
+		{
+			kbase_uk_mem_query *query = args;
+			if (sizeof(*query) != args_size)
+				goto bad_size;
+
+			if (query->gpu_addr & ~PAGE_MASK) {
+				KBASE_DEBUG_PRINT_WARN(KBASE_MEM, "kbase_dispatch case KBASE_FUNC_MEM_QUERY: query->gpu_addr: passed parameter is invalid");
+				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
+				break;
+			}
+			if (query->query != KBASE_MEM_QUERY_COMMIT_SIZE &&
+			    query->query != KBASE_MEM_QUERY_VA_SIZE &&
+				query->query != KBASE_MEM_QUERY_FLAGS) {
+				KBASE_DEBUG_PRINT_WARN(KBASE_MEM, "kbase_dispatch case KBASE_FUNC_MEM_QUERY: query->query = %lld unknown", (unsigned long long)query->query);
+				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
+				break;
+			}
+
+			ukh->ret = kbase_mem_query(kctx, query->gpu_addr, query->query, &query->value);
+			break;
+		}
+		break;
+
+	case KBASE_FUNC_MEM_FLAGS_CHANGE:
+		{
+			kbase_uk_mem_flags_change * fc = args;
+			if (sizeof(*fc) != args_size)
+				goto bad_size;
+
+			if ((fc->gpu_va & ~PAGE_MASK) && (fc->gpu_va >= PAGE_SIZE)) {
+				KBASE_DEBUG_PRINT_WARN(KBASE_MEM, "kbase_dispatch case KBASE_FUNC_MEM_FLAGS_CHANGE: mem->gpu_va: passed parameter is invalid");
+				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
+				break;
+			}
+
+			if (kbase_mem_flags_change(kctx, fc->gpu_va, fc->flags, fc->mask))
+				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
+
+			break;
+		}
 	case KBASE_FUNC_MEM_FREE:
 		{
 			kbase_uk_mem_free *mem = args;
@@ -546,91 +581,6 @@ static mali_error kbase_dispatch(kbase_context *kctx, void * const args, u32 arg
 				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
 			break;
 		}
-
-	case KBASE_FUNC_TMEM_GETSIZE:
-		{
-			kbase_uk_tmem_get_size *getsize = args;
-			if (sizeof(*getsize) != args_size)
-				goto bad_size;
-
-			if (getsize->gpu_addr & ~PAGE_MASK) {
-				KBASE_DEBUG_PRINT_WARN(KBASE_MEM, "kbase_dispatch case KBASE_FUNC_TMEM_GETSIZE: getsize->gpu_addr: passed parameter is invalid");
-				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
-				break;
-			}
-
-			ukh->ret = kbase_tmem_get_size(kctx, getsize->gpu_addr, &getsize->actual_size);
-			break;
-		}
-		break;
-
-	case KBASE_FUNC_TMEM_SETSIZE:
-		{
-			kbase_uk_tmem_set_size *set_size = args;
-
-			if (sizeof(*set_size) != args_size)
-				goto bad_size;
-
-			if (set_size->gpu_addr & ~PAGE_MASK) {
-				KBASE_DEBUG_PRINT_WARN(KBASE_MEM, "kbase_dispatch case KBASE_FUNC_TMEM_SETSIZE: set_size->gpu_addr: passed parameter is invalid");
-				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
-				break;
-			}
-
-			ukh->ret = kbase_tmem_set_size(kctx, set_size->gpu_addr, set_size->size, &set_size->actual_size, &set_size->result_subcode);
-			break;
-		}
-
-	case KBASE_FUNC_TMEM_RESIZE:
-		{
-			kbase_uk_tmem_resize *resize = args;
-			if (sizeof(*resize) != args_size)
-				goto bad_size;
-
-			if (resize->gpu_addr & ~PAGE_MASK) {
-				KBASE_DEBUG_PRINT_WARN(KBASE_MEM, "kbase_dispatch case KBASE_FUNC_TMEM_RESIZE: resize->gpu_addr: passed parameter is invalid");
-				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
-				break;
-			}
-
-			ukh->ret = kbase_tmem_resize(kctx, resize->gpu_addr, resize->delta, &resize->actual_size, &resize->result_subcode);
-			break;
-		}
-
-	case KBASE_FUNC_TMEM_SET_ATTRIBUTES:
-		{
-			kbase_uk_tmem_set_attributes* set_attributes = args;
-
-			if (sizeof(*set_attributes) != args_size)
-					goto bad_size;
-
-			if (set_attributes->gpu_addr & ~PAGE_MASK) {
-					KBASE_DEBUG_PRINT_WARN(KBASE_MEM, "kbase_dispatch case KBASE_FUNC_TMEM_SET_ATTRIBUTES: set_attributes->gpu_addr: passed parameter is invalid");
-					ukh->ret = MALI_ERROR_FUNCTION_FAILED;
-					break;
-			}
-			ukh->ret = kbase_tmem_set_attributes(kctx, set_attributes->gpu_addr, set_attributes->attributes);
-			break;
-
-		}
-
-	case KBASE_FUNC_TMEM_GET_ATTRIBUTES:
-		{
-			kbase_uk_tmem_get_attributes *get_attributes = args;
-
-			if (sizeof(*get_attributes) != args_size)
-				goto bad_size;
-
-			if (get_attributes->gpu_addr & ~PAGE_MASK) {
-				KBASE_DEBUG_PRINT_WARN(KBASE_MEM, "kbase_dispatch case KBASE_FUNC_TMEM_GET_ATTRIBUTES: get_attributes->gpu_addr: passed parameter is invalid");
-				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
-				break;
-			}
-
-			ukh->ret = kbase_tmem_get_attributes(kctx, get_attributes->gpu_addr, &get_attributes->attributes);
-			break;
-
-		}
 	case KBASE_FUNC_FIND_CPU_MAPPING:
 		{
 			kbase_uk_find_cpu_mapping *find = args;
@@ -648,11 +598,10 @@ static mali_error kbase_dispatch(kbase_context *kctx, void * const args, u32 arg
 			if (find->size > SIZE_MAX || find->cpu_addr > ULONG_MAX)
 				map = NULL;
 			else
-				map = kbasep_find_enclosing_cpu_mapping(kctx, find->gpu_addr, (void *)(uintptr_t) find->cpu_addr, (size_t) find->size);
+				map = kbasep_find_enclosing_cpu_mapping(kctx, find->gpu_addr, (uintptr_t) find->cpu_addr, (size_t) find->size);
 
 			if (NULL != map) {
-				find->uaddr = PTR_TO_U64(map->uaddr);
-				find->nr_pages = map->nr_pages;
+				find->uaddr = PTR_TO_U64(map->vma->vm_start);
 				find->page_off = map->page_off;
 			} else {
 				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
@@ -785,7 +734,7 @@ static mali_error kbase_dispatch(kbase_context *kctx, void * const args, u32 arg
 			if (sizeof(*controls) != args_size)
 				goto bad_size;
 
-			for (i = 0; i < BASE_PROFILING_CONTROL_MAX; i++) {
+			for (i = FBDUMP_CONTROL_MIN; i < FBDUMP_CONTROL_MAX; i++) {
 				controls->profiling_controls[i] = kbase_get_profiling_control(kbdev, i);
 			}
 
@@ -802,7 +751,7 @@ static mali_error kbase_dispatch(kbase_context *kctx, void * const args, u32 arg
 			if (sizeof(*controls) != args_size)
 				goto bad_size;
 
-			for (i = 0; i < BASE_PROFILING_CONTROL_MAX; i++)
+			for (i = FBDUMP_CONTROL_MIN; i < FBDUMP_CONTROL_MAX; i++)
 			{
 				_mali_profiling_control(i, controls->profiling_controls[i]);
 			}
@@ -826,6 +775,22 @@ static mali_error kbase_dispatch(kbase_context *kctx, void * const args, u32 arg
 static struct kbase_device *to_kbase_device(struct device *dev)
 {
 	return dev_get_drvdata(dev);
+}
+
+/*
+ * API to acquire device list semaphore and
+ * return pointer to the device list head
+ */
+const struct list_head *kbase_dev_list_get(void)
+{
+	down(&kbase_dev_list_lock);
+	return &kbase_dev_list;
+}
+
+/* API to release the device list semaphore */
+void kbase_dev_list_put(const struct list_head *dev_list)
+{
+	up(&kbase_dev_list_lock);
 }
 
 /* Find a particular kbase device (as specified by minor number), or find the "first" device if -1 is specified */
@@ -1029,6 +994,7 @@ static const struct file_operations kbase_fops = {
 	.read = kbase_read,
 	.poll = kbase_poll,
 	.unlocked_ioctl = kbase_ioctl,
+	.compat_ioctl = kbase_ioctl,
 	.mmap = kbase_mmap,
 	.check_flags = kbase_check_flags,
 };
@@ -1448,56 +1414,6 @@ void kbase_synchronize_irqs(kbase_device *kbdev)
 }
 
 #endif /* CONFIG_MALI_NO_MALI */
-
-/** Show callback for the @c gpu_memory sysfs file.
- *
- * This function is called to get the contents of the @c gpu_memory sysfs
- * file. This is a report of current gpu memory usage.
- *
- * @param dev  The device this sysfs file is for
- * @param attr The attributes of the sysfs file
- * @param buf  The output buffer for the sysfs file contents
- *
- * @return The number of bytes output to @c buf.
- */
-static ssize_t show_gpu_memory(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	ssize_t ret = 0;
-	struct list_head *entry;
-
-	ret += scnprintf(buf + ret, PAGE_SIZE - ret, "Name              cap(pages) usage(pages)\n" "=========================================\n");
-	down(&kbase_dev_list_lock);
-	list_for_each(entry, &kbase_dev_list) {
-		struct kbase_device *kbdev = NULL;
-		kbasep_kctx_list_element *element;
-
-		kbdev = list_entry(entry, struct kbase_device, osdev.entry);
-		/* output the total memory usage and cap for this device */
-		ret += scnprintf(buf + ret, PAGE_SIZE - ret, "%-16s  %10u   %10u\n", kbdev->osdev.devname, kbdev->memdev.usage.max_pages, atomic_read(&(kbdev->memdev.usage.cur_pages))
-		    );
-		mutex_lock(&kbdev->kctx_list_lock);
-		list_for_each_entry(element, &kbdev->kctx_list, link) {
-			/* output the memory usage and cap for each kctx opened on this device */
-			ret += scnprintf(buf + ret, PAGE_SIZE - ret, "  %s-0x%p %10u   %10u\n", "kctx", element->kctx, element->kctx->usage.max_pages, atomic_read(&(element->kctx->usage.cur_pages))
-			    );
-		}
-		mutex_unlock(&kbdev->kctx_list_lock);
-	}
-	up(&kbase_dev_list_lock);
-	if (PAGE_SIZE == ret) {
-		/* we attempted to write more than a page full - truncate */
-		buf[PAGE_SIZE - 2] = '\n';
-		buf[PAGE_SIZE - 1] = '\0';
-		ret = PAGE_SIZE - 1;
-	}
-	return ret;
-}
-
-/** The sysfs file @c gpu_memory.
- *
- * This is used for obtaining a report of current gpu memory usage.
- */
-DEVICE_ATTR(gpu_memory, S_IRUGO, show_gpu_memory, NULL);
 
 
 /** Show callback for the @c power_policy sysfs file.
@@ -2244,6 +2160,7 @@ static void kbase_common_reg_unmap(kbase_device * const kbdev)
 }
 #endif /* CONFIG_MALI_NO_MALI */
 
+
 static int kbase_common_device_init(kbase_device *kbdev)
 {
 	struct kbase_os_device *osdev = &kbdev->osdev;
@@ -2254,19 +2171,22 @@ static int kbase_common_device_init(kbase_device *kbdev)
 		inited_job_slot = (1u << 1),
 		inited_pm = (1u << 2),
 		inited_js = (1u << 3),
-		inited_irqs = (1u << 4)
-		    , inited_debug = (1u << 5)
-		    , inited_js_softstop = (1u << 6)
+		inited_irqs = (1u << 4),
+		inited_debug = (1u << 5),
+		inited_js_softstop = (1u << 6),
 #if MALI_CUSTOMER_RELEASE == 0
-		    , inited_js_timeouts = (1u << 7)
+		inited_js_timeouts = (1u << 7),
 #endif /* MALI_CUSTOMER_RELEASE == 0 */
-		    , inited_pm_runtime_init = (1u << 8)
-		    , inited_gpu_memory = (1u << 9)
+		inited_pm_runtime_init = (1u << 8),
+#ifdef CONFIG_DEBUG_FS
+		inited_gpu_memory = (1u << 9),
+		inited_debugfs = (1u << 10),
+#endif /* CONFIG_DEBUG_FS */
 #ifdef CONFIG_MALI_DEBUG_SHADER_SPLIT_FS
-		,inited_sc_split        = (1u << 10)
+		inited_sc_split = (1u << 11),
 #endif /* CONFIG_MALI_DEBUG_SHADER_SPLIT_FS */
 #ifdef CONFIG_MALI_TRACE_TIMELINE
-		,inited_timeline = (1u << 11)
+		inited_timeline = (1u << 12),
 #endif /* CONFIG_MALI_TRACE_LINE */
 	};
 
@@ -2280,6 +2200,16 @@ static int kbase_common_device_init(kbase_device *kbdev)
 	osdev->mdev.parent = get_device(osdev->dev);
 
 	scnprintf(osdev->devname, DEVNAME_SIZE, "%s%d", kbase_drv_name, kbase_dev_nr++);
+
+#ifdef CONFIG_DEBUG_FS
+	kbdev->mali_debugfs_directory = debugfs_create_dir("mali", NULL);
+	if (NULL == kbdev->mali_debugfs_directory) {
+		dev_err(osdev->dev, "Couldn't create mali debugfs directory\n");
+		goto out_partial;
+	}
+	inited |= inited_debugfs;
+#endif /* CONFIG_DEBUG_FS */
+
 
 	if (misc_register(&osdev->mdev)) {
 		dev_err(osdev->dev, "Couldn't register misc dev %s\n", osdev->devname);
@@ -2355,11 +2285,14 @@ static int kbase_common_device_init(kbase_device *kbdev)
 	inited |= inited_sc_split;
 #endif /* CONFIG_MALI_DEBUG_SHADER_SPLIT_FS */
 
-	if (device_create_file(osdev->dev, &dev_attr_gpu_memory)) {
-		dev_err(osdev->dev, "Couldn't create gpu_memory sysfs file\n");
+#ifdef CONFIG_DEBUG_FS
+	if (kbasep_gpu_memory_debugfs_init(kbdev)) {
+		dev_err(osdev->dev, "Couldn't create gpu_memory debugfs file\n");
 		goto out_partial;
 	}
 	inited |= inited_gpu_memory;
+#endif /* CONFIG_DEBUG_FS */
+
 #ifdef CONFIG_MALI_DEBUG
 
 	if (device_create_file(osdev->dev, &dev_attr_debug_command)) {
@@ -2426,8 +2359,13 @@ static int kbase_common_device_init(kbase_device *kbdev)
 		device_remove_file(kbdev->osdev.dev, &dev_attr_debug_command);
 
 #endif /* CONFIG_MALI_DEBUG */
+
+#ifdef CONFIG_DEBUG_FS
 	if (inited & inited_gpu_memory)
-		device_remove_file(kbdev->osdev.dev, &dev_attr_gpu_memory);
+		kbasep_gpu_memory_debugfs_term(kbdev);
+	if (inited & inited_debugfs)
+		debugfs_remove(kbdev->mali_debugfs_directory);
+#endif /* CONFIG_DEBUG_FS */
 
 #ifdef CONFIG_MALI_DEBUG_SHADER_SPLIT_FS
 	if (inited & inited_sc_split)
@@ -2649,7 +2587,10 @@ static int kbase_common_device_remove(struct kbase_device *kbdev)
 #if MALI_CUSTOMER_RELEASE == 0
 	device_remove_file(kbdev->osdev.dev, &dev_attr_js_timeouts);
 #endif /* MALI_CUSTOMER_RELEASE */
-	device_remove_file(kbdev->osdev.dev, &dev_attr_gpu_memory);
+#ifdef CONFIG_DEBUG_FS
+	kbasep_gpu_memory_debugfs_term(kbdev);
+	debugfs_remove(kbdev->mali_debugfs_directory);
+#endif /* CONFIG_DEBUG_FS */
 
 #ifdef CONFIG_MALI_DEBUG_SHADER_SPLIT_FS
 	device_remove_file(kbdev->osdev.dev, &dev_attr_sc_split);
@@ -2815,6 +2756,7 @@ static const struct dev_pm_ops kbase_pm_ops = {
 #ifdef CONFIG_OF
 static const struct of_device_id kbase_dt_ids[] = {
 	{ .compatible = "arm,malit6xx" },
+	{ .compatible = "arm,mali-midgard" },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, kbase_dt_ids);

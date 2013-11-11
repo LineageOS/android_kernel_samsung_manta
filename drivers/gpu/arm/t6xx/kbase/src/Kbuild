@@ -108,6 +108,7 @@ SRC := \
 	common/mali_kbase_mem_lowlevel.c \
 	common/mali_kbase_debug.c \
 	common/mali_kbase_trace_timeline.c \
+	linux/mali_kbase_gpu_memory_debugfs.c \
 	linux/mali_kbase_mem_linux.c \
 	linux/mali_kbase_core_linux.c \
 	linux/mali_kbase_sync.c \
@@ -169,6 +170,14 @@ ifeq ($(CONFIG_MALI_PLATFORM_FAKE),y)
 		platform/vexpress/mali_kbase_cpu_vexpress.c
 	endif
 
+	ifeq ($(CONFIG_MALI_PLATFORM_RTSM_VE_AEMV8A),y)
+		SRC += platform/rtsm_ve_aemv8a/mali_kbase_config_vexpress.c
+	endif
+
+	ifeq ($(CONFIG_MALI_PLATFORM_JUNO),y)
+		SRC += platform/juno/mali_kbase_config_vexpress.c
+	endif
+
 	ifeq ($(CONFIG_MALI_PLATFORM_VEXPRESS_VIRTEX7_40MHZ),y)
 		SRC += platform/vexpress_virtex7_40mhz/mali_kbase_config_vexpress.c \
 		platform/vexpress_virtex7_40mhz/mali_kbase_cpu_vexpress.c
@@ -209,6 +218,14 @@ ifeq ($(CONFIG_MALI_PLATFORM_FAKE),m)
 	ifeq ($(CONFIG_MALI_PLATFORM_VEXPRESS),y)
 		PSRC += platform/vexpress/mali_kbase_config_vexpress.c \
 		platform/vexpress/mali_kbase_cpu_vexpress.c
+	endif
+
+	ifeq ($(CONFIG_MALI_PLATFORM_RTSM_VE_AEMV8A),y)
+		PSRC += platform/rtsm_ve_aemv8a/mali_kbase_config_vexpress.c
+	endif
+
+	ifeq ($(CONFIG_MALI_PLATFORM_JUNO),y)
+		PSRC += platform/juno/mali_kbase_config_vexpress.c
 	endif
 
 	ifeq ($(CONFIG_MALI_PLATFORM_VEXPRESS_VIRTEX7_40MHZ),y)
