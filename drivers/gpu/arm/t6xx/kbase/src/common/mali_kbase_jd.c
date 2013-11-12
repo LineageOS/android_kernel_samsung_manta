@@ -1302,7 +1302,9 @@ static enum hrtimer_restart zap_timeout_callback(struct hrtimer *timer)
 void kbase_jd_zap_context(kbase_context *kctx)
 {
 	kbase_jd_atom *katom;
+#ifdef CONFIG_KDS
 	struct list_head *entry;
+#endif
 	kbase_device *kbdev;
 	zap_reset_data reset_data;
 	unsigned long flags;
@@ -1321,9 +1323,11 @@ void kbase_jd_zap_context(kbase_context *kctx)
 	 * queued outside the job scheduler.
 	 */
 
-	list_for_each(entry, &kctx->waiting_soft_jobs) {
-		katom = list_entry(entry, kbase_jd_atom, dep_item[0]);
-
+	while (!list_empty(&kctx->waiting_soft_jobs)) {
+		katom = list_first_entry(&kctx->waiting_soft_jobs,
+					kbase_jd_atom,
+					dep_item[0]);
+		list_del(&katom->dep_item[0]);
 		kbase_cancel_soft_job(katom);
 	}
 
