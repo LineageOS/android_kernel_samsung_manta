@@ -1,12 +1,15 @@
 /*
  *
- * (C) COPYRIGHT 2011-2012 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2011-2013 ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
 
@@ -33,8 +36,6 @@
  * Internally, this policy keeps a few internal queues for different variants
  * of core requirements, which are used to decide how to schedule onto the
  * different job slots.
- *
- * Currently, one extra variant is supported: an NSS variant.
  *
  * Must be a power of 2 to keep the lookup math simple
  */
@@ -70,7 +71,6 @@ typedef struct kbasep_js_policy_cfs {
 	/* Lookups per job slot against which core_req_variants match it */
 	u32 slot_to_variant_lookup_ss_state[KBASEP_JS_VARIANT_LOOKUP_WORDS_NEEDED];
 	u32 slot_to_variant_lookup_ss_allcore_state[KBASEP_JS_VARIANT_LOOKUP_WORDS_NEEDED];
-	u32 slot_to_variant_lookup_nss_state[KBASEP_JS_VARIANT_LOOKUP_WORDS_NEEDED];
 
 	/* The timer tick used for rescheduling jobs */
 	struct hrtimer scheduling_timer;
@@ -91,7 +91,7 @@ typedef struct kbasep_js_policy_cfs {
 	 * -1 if context queue is empty. */
 	atomic64_t least_runtime_us;
 
-	/* Number of us the least-run context in the realtime (priority) context queue 
+	/* Number of us the least-run context in the realtime (priority) context queue
 	 * has been running for. -1 if realtime context queue is empty. */
 	atomic64_t rt_least_runtime_us;
 } kbasep_js_policy_cfs;

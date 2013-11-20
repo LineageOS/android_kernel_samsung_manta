@@ -2,11 +2,14 @@
  *
  * (C) COPYRIGHT 2012-2013 ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
 
@@ -22,8 +25,13 @@
 
 void kbase_sync_to_memory(phys_addr_t paddr, void *vaddr, size_t sz)
 {
+const u32 PARTIAL_FLUSH_FASTER_SIZE = 2539520;
 #ifdef CONFIG_ARM
-	dmac_flush_range(vaddr, vaddr + sz);
+	if(sz < PARTIAL_FLUSH_FASTER_SIZE)
+		__cpuc_flush_dcache_area(vaddr, sz);	
+	else
+		flush_cache_all();
+
 	outer_flush_range(paddr, paddr + sz);
 #elif defined(CONFIG_X86)
 	struct scatterlist scl = { 0, };
@@ -37,8 +45,13 @@ void kbase_sync_to_memory(phys_addr_t paddr, void *vaddr, size_t sz)
 
 void kbase_sync_to_cpu(phys_addr_t paddr, void *vaddr, size_t sz)
 {
+const u32 PARTIAL_FLUSH_FASTER_SIZE = 2539520;
 #ifdef CONFIG_ARM
-	dmac_flush_range(vaddr, vaddr + sz);
+	if(sz < PARTIAL_FLUSH_FASTER_SIZE)
+		__cpuc_flush_dcache_area(vaddr, sz);	
+	else
+		flush_cache_all();
+	
 	outer_flush_range(paddr, paddr + sz);
 #elif defined(CONFIG_X86)
 	struct scatterlist scl = { 0, };

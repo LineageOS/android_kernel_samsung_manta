@@ -1,12 +1,15 @@
 /*
  *
- * (C) COPYRIGHT 2011-2012 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2011-2013 ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
 
@@ -157,12 +160,12 @@
  *   - kbasep_js_policy_runpool_add_ctx() on new_ctx
  *   - (all of this work is deferred on a work-queue to keep the IRQ handler quick)
  * - If there is space in the completed job slots' HEAD/NEXT registers, run the next job:
- *  - kbasep_js_policy_dequeue_job_irq() <em>in the context of the irq
+ *  - kbasep_js_policy_dequeue_job() <em>in the context of the irq
  * handler</em> with core_req set to that of the completing slot
  *  - if this returned MALI_TRUE, submit the job to the completed slot.
- *  - This is repeated until kbasep_js_policy_dequeue_job_irq() returns
+ *  - This is repeated until kbasep_js_policy_dequeue_job() returns
  * MALI_FALSE, or the job slot has a job queued on both the HEAD and NEXT registers.
- *  - If kbasep_js_policy_dequeue_job_irq() returned false, submit some work to
+ *  - If kbasep_js_policy_dequeue_job() returned false, submit some work to
  * the work-queue to retry from outside of IRQ context (calling
  * kbasep_js_policy_dequeue_job() from a work-queue).
  *
@@ -220,25 +223,6 @@
  * - kbasep_js_policy_should_remove_ctx():
  *  - This is usually just a comparison of the stored time value against some
  * maximum value.
- * - kbasep_js_policy_dequeue_job_irq():
- *  - For very fast operation, it can keep a very small buffer of 1 element per
- * job-slot that allows the job at the head of the runpool for each job-slot
- * to be retreived very quickly (O(1) time). This is complicated by high
- * priority jobs that may 'jump' the queue, but could be eased by having a
- * second buffer for high priority jobs. This assumes the requirement is only to
- * run any high priority job quickly, not to run the highest high priority job
- * quickly.
- *  - Of course, if a job slot completes two jobs in quick succession, then
- * kbasep_js_policy_dequeue_job_irq() can return MALI_FALSE on the second call
- * (because the small quick-access buffer is already exhausted)
- *  - The quick-access buffer must be refilled by the other Policy Job
- * Management APIs that are called ourside of IRQ context.
- *  - This scheme guarantees that we keep every jobslot busy with at least one
- * job - good utilization.
- *  - As a side effect, processes that try to submit too many quick-running
- * jobs (to increase IRQ rate to cause a DoS attack ) will be limited to the
- * rate at which the kernel work-queue can be serivced. This can be seen as a
- * benefit.
  *
  * @note all deferred work can be wrapped up into one call - we usually need to
  * indicate that a job/bag is done outside of IRQ context anyway.
@@ -301,7 +285,7 @@
  * - We could just wait until the IRQ handler fires, but for certain types of
  * jobs this can take comparatively a long time to complete, e.g. GLES FS jobs
  * generally take much longer to run that GLES CS jobs, which are vertex shader
- * jobs. Even worse are NSS jobs, which may run for seconds/minutes.
+ * jobs.
  * - Therefore, when a new job appears in the ctx, we must check the job-slots
  * to see if they're free, and run the jobs as before.
  *
@@ -718,14 +702,6 @@ void kbasep_js_policy_deregister_job(kbasep_js_policy *js_policy, kbase_context 
  *
  * @note base_jd_core_req is currently a u8 - beware of type conversion.
  *
- * @note This API is not called from IRQ context outside of the policy
- * itself, and so need not operate in O(1) time. Refer to
- * kbasep_js_policy_dequeue_job_irq() for dequeuing from IRQ context.
- *
- * As a result of kbasep_js_policy_dequeue_job_irq(), this function might need to
- * carry out work to maintain its internal queues both before and after a job
- * is dequeued.
- *
  * The caller has the following conditions on locking:
  * - kbasep_js_device_data::runpool_lock::irq will be held.
  * - kbasep_js_device_data::runpool_mutex will be held.
@@ -734,46 +710,11 @@ void kbasep_js_policy_deregister_job(kbasep_js_policy *js_policy, kbase_context 
 mali_bool kbasep_js_policy_dequeue_job(kbase_device *kbdev, int job_slot_idx, kbase_jd_atom ** const katom_ptr);
 
 /**
- * @brief IRQ Context Fast equivalent of kbasep_js_policy_dequeue_job()
- *
- * This is a 'fast' variant of kbasep_js_policy_dequeue_job() that will be
- * called from IRQ context.
- *
- * It is recommended that this is coded to be O(1) and must be capable of
- * returning at least one job per job-slot to IRQ context. If IRQs occur in
- * quick succession without any work done in non-irq context, then this
- * function is allowed to return MALI_FALSE even if there are jobs available
- * that satisfy the requirements.
- *
- * This relaxation of correct dequeuing allows O(1) execution with bounded
- * memory requirements. For example, in addition to the ctxs' job queues the run
- * pool can have a buffer that can contain a single job for 'quick access' per job
- * slot, but this buffer is only refilled from the job queue outside of IRQ
- * context.
- *
- * Therefore, all other Job Scheduled Policy Job Management APIs  can be
- * implemented to refill this buffer/maintain the Run Pool's job queues outside
- * of IRQ context.
- *
- * The caller has the following conditions on locking:
- * - kbasep_js_device_data::runpool_irq::lock will be held.
- *
- * @note The caller \em might be holding one of the
- * kbasep_js_kctx_info::ctx::jsctx_mutex locks, if this code is called from
- * outside of IRQ context.
- */
-mali_bool kbasep_js_policy_dequeue_job_irq(kbase_device *kbdev, int job_slot_idx, kbase_jd_atom ** const katom_ptr);
-
-/**
  * @brief Requeue a Job back into the the Job Scheduler Policy Run Pool
  *
  * This will be used to enqueue a job after its creation and also to requeue
  * a job into the Run Pool that was previously dequeued (running). It notifies
  * the policy that the job should be run again at some point later.
- *
- * As a result of kbasep_js_policy_dequeue_job_irq(), this function might need to
- * carry out work to maintain its internal queues both before and after a job
- * is requeued.
  *
  * The caller has the following conditions on locking:
  * - kbasep_js_device_data::runpool_irq::lock (a spinlock) will be held.

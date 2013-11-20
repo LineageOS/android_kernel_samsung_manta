@@ -2,11 +2,14 @@
  *
  * (C) COPYRIGHT 2011-2013 ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
 
@@ -19,6 +22,10 @@
 #include <linux/syscalls.h>
 #include "../linux/mali_kbase_sync.h"
 #endif
+
+
+/* Mask to check cache alignment of data structures */
+#define KBASE_CACHE_ALIGNMENT_MASK		((1<<CONFIG_ARM_L1_CACHE_SHIFT)-1)
 
 /**
  * @file mali_kbase_softjobs.c
@@ -59,7 +66,6 @@ static int kbase_dump_cpu_gpu_time(kbase_jd_atom *katom)
 		list_add_tail(&katom->dep_item[1], &js_devdata->suspended_soft_jobs_list);
 		mutex_unlock(&js_devdata->runpool_mutex);
 
-		
 		return pm_active_err;
 	}
 
@@ -304,7 +310,10 @@ mali_error kbase_prepare_soft_job(kbase_jd_atom *katom)
 {
 	switch (katom->core_req) {
 	case BASE_JD_REQ_SOFT_DUMP_CPU_GPU_TIME:
-		/* Nothing to do */
+		{
+			if(0 != (katom->jc & KBASE_CACHE_ALIGNMENT_MASK))
+				return MALI_ERROR_FUNCTION_FAILED;
+		}
 		break;
 #ifdef CONFIG_SYNC
 	case BASE_JD_REQ_SOFT_FENCE_TRIGGER:
@@ -336,7 +345,6 @@ mali_error kbase_prepare_soft_job(kbase_jd_atom *katom)
 	case BASE_JD_REQ_SOFT_FENCE_WAIT:
 		{
 			base_fence fence;
-			int fd;
 			if (0 != copy_from_user(&fence, (__user void *)(uintptr_t) katom->jc, sizeof(fence)))
 				return MALI_ERROR_FUNCTION_FAILED;
 

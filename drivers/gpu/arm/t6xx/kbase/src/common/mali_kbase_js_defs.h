@@ -2,11 +2,14 @@
  *
  * (C) COPYRIGHT 2011-2013 ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
 
@@ -138,14 +141,10 @@ typedef void (*kbasep_js_policy_ctx_job_cb)(struct kbase_device *kbdev, struct k
  * - The context holds a refcount of how many atoms have this attribute.
  *
  * Examples of use:
- * - Finding out when NSS jobs are in the runpool
  * - Finding out when there are a mix of @ref BASE_CONTEXT_HINT_ONLY_COMPUTE
  * and ! @ref BASE_CONTEXT_HINT_ONLY_COMPUTE contexts in the runpool
  */
 typedef enum {
-	/** Attribute indicating an NSS context */
-	KBASEP_JS_CTX_ATTR_NSS,
-
 	/** Attribute indicating a context that contains Compute jobs. That is,
 	 * @ref BASE_CONTEXT_HINT_ONLY_COMPUTE is \b set and/or the context has jobs of type
 	 * @ref BASE_JD_REQ_ONLY_COMPUTE
@@ -232,12 +231,12 @@ typedef struct kbasep_js_per_as_data {
  * device. This context is global to the device, and is not tied to any
  * particular kbase_context running on the device.
  *
- * nr_contexts_running, nr_nss_ctxs_running and as_free are
- * optimized for packing together (by making them smaller types than u32). The
- * operations on them should rarely involve masking. The use of signed types for
- * arithmetic indicates to the compiler that the value will not rollover (which
- * would be undefined behavior), and so under the Total License model, it is free
- * to make optimizations based on that (i.e. to remove masking).
+ * nr_contexts_running and as_free are optimized for packing together (by making
+ * them smaller types than u32). The operations on them should rarely involve
+ * masking. The use of signed types for arithmetic indicates to the compiler that
+ * the value will not rollover (which would be undefined behavior), and so under
+ * the Total License model, it is free to make optimizations based on that (i.e.
+ * to remove masking).
  */
 typedef struct kbasep_js_device_data {
 	/** Sub-structure to collect together Job Scheduling data used in IRQ context */

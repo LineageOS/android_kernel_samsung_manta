@@ -2,11 +2,14 @@
  *
  * (C) COPYRIGHT 2011-2013 ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
 
@@ -123,7 +126,7 @@ void kbasep_js_kctx_term(kbase_context *kctx);
  * schedule the context/run the job.
  *
  * This atomically does the following:
- * - Update the numbers of jobs information (including NSS state changes)
+ * - Update the numbers of jobs information
  * - Add the job to the run pool if necessary (part of init_job)
  *
  * Once this is done, then an appropriate action is taken:
@@ -198,11 +201,6 @@ void kbasep_js_remove_job(kbase_device *kbdev, kbase_context *kctx, kbase_jd_ato
  * This is a variant of kbasep_js_remove_job() that takes care of removing all
  * of the retained state too. This is generally useful for cancelled atoms,
  * which need not be handled in an optimal way.
- *
- * As such, this can cause an NSS/SS state transition. In this case, slots that
- * previously could not have jobs submitted to might now be submittable to. For
- * this reason, and NSS/SS state transition will cause the Scheduler to try to
- * submit new jobs on the jm_slots.
  *
  * It is a programming error to call this when:
  * - \a atom is not a job belonging to kctx.
@@ -378,10 +376,9 @@ void kbasep_js_runpool_release_ctx_and_katom_retained_state(kbase_device *kbdev,
  * The following locks must be held by the caller:
  * - kbasep_js_device_data::runpool_irq::lock
  *
- * @return truthful (i.e. != MALI_FALSE) if there was space to submit in the
- * GPU, but we couldn't get a job from the Run Pool. This may be because the
- * Run Pool needs maintenence outside of IRQ context. Therefore, this indicates
- * that submission should be retried from a work-queue, by using
+ * @return truthful (i.e. != MALI_FALSE) if too many jobs were submitted from
+ * IRQ. Therefore, this indicates that submission should be retried from a
+ * work-queue, by using
  * kbasep_js_try_run_next_job_on_slot_nolock()/kbase_js_try_run_jobs_on_slot().
  * @return MALI_FALSE if submission had no problems: the GPU is either already
  * full of jobs in the HEAD and NEXT registers, or we were able to get enough
@@ -709,9 +706,24 @@ static INLINE void kbasep_js_clear_job_retry_submit(kbase_jd_atom *atom)
 	atom->retry_submit_on_slot = KBASEP_JS_RETRY_SUBMIT_SLOT_INVALID;
 }
 
+/**
+ * Mark a slot as requiring resubmission by carrying that information on a
+ * completing atom.
+ *
+ * @note This can ASSERT in debug builds if the submit slot has been set to
+ * something other than the current value for @a js. This is because you might
+ * be unintentionally stopping more jobs being submitted on the old submit
+ * slot, and that might cause a scheduling-hang.
+ *
+ * @note If you can guarantee that the atoms for the original slot will be
+ * submitted on some other slot, then call kbasep_js_clear_job_retry_submit()
+ * first to silence the ASSERT.
+ */
 static INLINE void kbasep_js_set_job_retry_submit_slot(kbase_jd_atom *atom, int js)
 {
 	KBASE_DEBUG_ASSERT(0 <= js && js <= BASE_JM_MAX_NR_SLOTS);
+	KBASE_DEBUG_ASSERT(atom->retry_submit_on_slot == KBASEP_JS_RETRY_SUBMIT_SLOT_INVALID
+	                   || atom->retry_submit_on_slot == js);
 
 	atom->retry_submit_on_slot = js;
 }

@@ -421,7 +421,7 @@ int s5p_mfc_init_hw(struct s5p_mfc_dev *dev)
 
 	dev->fw.date = MFC_GET_REG(SYS_FW_VER_ALL);
 	/* Check MFC version and F/W version */
-	if (dev->fw.date >= 0x120328) {
+	if (FW_HAS_VER_INFO(dev)) {
 		mfc_info = MFC_GET_REG(SYS_MFC_VER);
 		if (mfc_info != dev->fw.ver) {
 			mfc_err("Invalid F/W version(0x%x) for MFC H/W(0x%x)\n",

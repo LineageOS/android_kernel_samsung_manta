@@ -1,12 +1,15 @@
 /*
  *
- * (C) COPYRIGHT 2012 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2012-2013 ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
 
@@ -68,8 +71,10 @@ int kbase_stream_create_fence(int tl_fd)
 	struct sync_timeline *tl;
 	struct sync_pt *pt;
 	struct sync_fence *fence;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 7, 0)
 	struct files_struct *files;
 	struct fdtable *fdt;
+#endif
 	int fd;
 	struct file *tl_file;
 
@@ -100,6 +105,13 @@ int kbase_stream_create_fence(int tl_fd)
 	/* from here the fence owns the sync_pt */
 
 	/* create a fd representing the fence */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 7, 0)
+	fd = get_unused_fd_flags(O_RDWR | O_CLOEXEC);
+	if (fd < 0) {
+		sync_fence_put(fence);
+		goto out;
+	}
+#else
 	fd = get_unused_fd();
 	if (fd < 0) {
 		sync_fence_put(fence);
@@ -115,6 +127,7 @@ int kbase_stream_create_fence(int tl_fd)
 	FD_SET(fd, fdt->close_on_exec);
 #endif
 	spin_unlock(&files->file_lock);
+#endif  /* LINUX_VERSION_CODE >= KERNEL_VERSION(3, 7, 0) */
 
 	/* bind fence to the new fd */
 	sync_fence_install(fence, fd);

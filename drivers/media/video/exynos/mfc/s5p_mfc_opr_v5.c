@@ -1028,6 +1028,8 @@ static int s5p_mfc_set_enc_params_h264(struct s5p_mfc_ctx *ctx)
 	/** AR VUI control */
 	shm &= ~(0x1 << 15);
 	shm |= (p_264->ar_vui << 1);
+	shm &= ~(0x1 << 8);
+	shm |= (p_264->prepend_sps_pps_to_idr << 8);
 	s5p_mfc_write_info(ctx, shm, EXT_ENC_CONTROL);
 
 	if (p_264->ar_vui) {

@@ -667,6 +667,15 @@ static struct v4l2_queryctrl controls[] = {
 		.default_value = 0,
 	},
 	{
+		.id = V4L2_CID_MPEG_VIDEO_H264_PREPEND_SPSPPS_TO_IDR,
+		.type = V4L2_CTRL_TYPE_INTEGER,
+		.name = "Prepend SPS/PPS to every IDR",
+		.minimum = 0,
+		.maximum = 1,
+		.step = 1,
+		.default_value = 0,
+	},
+	{
 		.id = V4L2_CID_MPEG_VIDEO_MPEG4_PROFILE,
 		.type = V4L2_CTRL_TYPE_INTEGER,
 		.name = "MPEG4 profile",
@@ -837,6 +846,12 @@ static int check_ctrl_val(struct s5p_mfc_ctx *ctx, struct v4l2_control *ctrl)
 		v4l2_err(&dev->v4l2_dev, "Invalid control value\n");
 		return -ERANGE;
 	}
+	if (!FW_HAS_ENC_SPSPPS_CTRL(dev) && ctrl->id ==	\
+			V4L2_CID_MPEG_VIDEO_H264_PREPEND_SPSPPS_TO_IDR) {
+		mfc_err("Not support feature(0x%x) for F/W\n", ctrl->id);
+		return -ERANGE;
+	}
+
 	return 0;
 }
 
@@ -2547,6 +2562,9 @@ static int set_enc_param(struct s5p_mfc_ctx *ctx, struct v4l2_control *ctrl)
 		p->codec.h264.aso_slice_order[(ctrl->value >> 18) & 0x7]
 			|= (ctrl->value & 0xFF) << \
 				(((ctrl->value >> 16) & 0x3) << 3);
+		break;
+	case V4L2_CID_MPEG_VIDEO_H264_PREPEND_SPSPPS_TO_IDR:
+		p->codec.h264.prepend_sps_pps_to_idr = ctrl->value ? 1 : 0;
 		break;
 	case V4L2_CID_MPEG_VIDEO_MPEG4_PROFILE:
 		switch (ctrl->value) {

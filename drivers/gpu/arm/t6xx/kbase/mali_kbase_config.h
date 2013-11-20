@@ -2,11 +2,14 @@
  *
  * (C) COPYRIGHT 2010-2013 ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
 
@@ -220,11 +223,10 @@ enum {
 	KBASE_CONFIG_ATTR_JS_SOFT_STOP_TICKS,
 
 	/**
-	 * Job Scheduler minimum number of scheduling ticks before Soft-Stoppable
-	 * (BASE_JD_REQ_NSS bit \b clear) jobs are hard-stopped.
+	 * Job Scheduler minimum number of scheduling ticks before jobs are hard-stopped.
 	 *
-	 * This defines the amount of time a Soft-Stoppable job is allowed to spend
-	 * on the GPU before it is killed. Such jobs won't be resumed if killed.
+	 * This defines the amount of time a job is allowed to spend on the GPU before it
+	 * is killed. Such jobs won't be resumed if killed.
 	 *
 	 * This value is supported by the following scheduling policies:
 	 * - The Completely Fair Share (CFS) policy
@@ -240,11 +242,11 @@ enum {
 	KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_SS,
 
 	/**
-	 * Job Scheduler minimum number of scheduling ticks before Non-Soft-Stoppable
-	 * (BASE_JD_REQ_NSS bit \b set) jobs are hard-stopped.
+	 * Job Scheduler minimum number of scheduling ticks before jobs are hard-stopped
+	 * when dumping.
 	 *
-	 * This defines the amount of time a Non-Soft-Stoppable job is allowed to spend
-	 * on the GPU before it is killed. Such jobs won't be resumed if killed.
+	 * This defines the amount of time a job is allowed to spend on the GPU before it
+	 * is killed. Such jobs won't be resumed if killed.
 	 *
 	 * This value is supported by the following scheduling policies:
 	 * - The Completely Fair Share (CFS) policy
@@ -333,14 +335,13 @@ enum {
 	KBASE_CONFIG_ATTR_JS_CFS_CTX_RUNTIME_MIN_SLICES,
 
 	/**
-	 * Job Scheduler minimum number of scheduling ticks before Soft-Stoppable
-	 * (BASE_JD_REQ_NSS bit \b clear) jobs cause the GPU to be reset.
+	 * Job Scheduler minimum number of scheduling ticks before jobs cause the GPU to be
+	 * reset.
 	 *
-	 * This defines the amount of time a Soft-Stoppable job is allowed to spend
-	 * on the GPU before it is assumed that the GPU has hung and needs to be reset.
-	 * The assumes that the job has been hard-stopped already and so the presence of
-	 * a job that has remained on the GPU for so long indicates that the GPU has in some
-	 * way hung.
+	 * This defines the amount of time a job is allowed to spend on the GPU before it 
+	 * is assumed that the GPU has hung and needs to be reset. The assumes that the job
+	 * has been hard-stopped already and so the presence of a job that has remained on
+	 * the GPU for so long indicates that the GPU has in some way hung.
 	 *
 	 * This value is supported by the following scheduling policies:
 	 * - The Completely Fair Share (CFS) policy
@@ -353,14 +354,13 @@ enum {
 	KBASE_CONFIG_ATTR_JS_RESET_TICKS_SS,
 
 	/**
-	 * Job Scheduler minimum number of scheduling ticks before Non-Soft-Stoppable
-	 * (BASE_JD_REQ_NSS bit \b set) jobs cause the GPU to be reset.
+	 * Job Scheduler minimum number of scheduling ticks before jobs cause the GPU to be
+	 * reset when dumping.
 	 *
-	 * This defines the amount of time a Non-Soft-Stoppable job is allowed to spend
-	 * on the GPU before it is assumed that the GPU has hung and needs to be reset.
-	 * The assumes that the job has been hard-stopped already and so the presence of
-	 * a job that has remained on the GPU for so long indicates that the GPU has in some
-	 * way hung.
+	 * This defines the amount of time a job is allowed to spend on the GPU before it
+	 * is assumed that the GPU has hung and needs to be reset. The assumes that the job
+	 * has been hard-stopped already and so the presence of a job that has remained on 
+	 * the GPU for so long indicates that the GPU has in some way hung.
 	 *
 	 * This value is supported by the following scheduling policies:
 	 * - The Completely Fair Share (CFS) policy
@@ -453,7 +453,7 @@ enum {
 	 *    KBASE_AID_16 - use 16 IDs (4 ID bits)
 	 *    KBASE_AID_8  - use 8 IDs (3 ID bits)
 	 *    KBASE_AID_4  - use 4 IDs (2 ID bits)
-	 * Default value: KBASE_AID_32 (no limit). Note hardware implementation 
+	 * Default value: KBASE_AID_32 (no limit). Note hardware implementation
 	 * may limit to a lower value.
 	 */
 	KBASE_CONFIG_ATTR_ARID_LIMIT,
@@ -466,7 +466,7 @@ enum {
 	 *    KBASE_AID_16 - use 16 IDs (4 ID bits)
 	 *    KBASE_AID_8  - use 8 IDs (3 ID bits)
 	 *    KBASE_AID_4  - use 4 IDs (2 ID bits)
-	 * Default value: KBASE_AID_32 (no limit). Note hardware implementation 
+	 * Default value: KBASE_AID_32 (no limit). Note hardware implementation
 	 * may limit to a lower value.
 	 */
 	KBASE_CONFIG_ATTR_AWID_LIMIT,
@@ -485,15 +485,46 @@ enum {
 	 * Attached value: u32 value
 	 * Default value: 500 Milliseconds
 	 */
-
 	KBASE_CONFIG_ATTR_POWER_MANAGEMENT_DVFS_FREQ,
+
+	/**
+	 * Power Management poweroff tick granuality. This is in nanoseconds to
+	 * allow HR timer support.
+	 *
+	 * On each scheduling tick, the power manager core may decide to:
+	 * -# Power off one or more shader cores
+	 * -# Power off the entire GPU
+	 *
+	 * Attached value: number in nanoseconds
+	 * Default value: @ref DEFAULT_PM_GPU_POWEROFF_TICK_NS,
+	 */
+	KBASE_CONFIG_ATTR_PM_GPU_POWEROFF_TICK_NS,
+
+	/**
+	 * Power Manager number of ticks before shader cores are powered off
+	 *
+	 * Attached value: unsigned 32-bit kbasep_pm_device_data::poweroff_shader_ticks<br>
+	 * Default value: @ref DEFAULT_PM_POWEROFF_TICK_SHADER
+	 *
+	 * @see KBASE_CONFIG_ATTR_PM_GPU_POWEROFF_TICK_NS
+	 */
+	KBASE_CONFIG_ATTR_PM_POWEROFF_TICK_SHADER,
+
+	/**
+	 * Power Manager number of ticks before GPU is powered off
+	 *
+	 * Attached value: unsigned 32-bit kbasep_pm_device_data::poweroff_gpu_ticks<br>
+	 * Default value: @ref DEFAULT_PM_POWEROFF_TICK_GPU
+	 *
+	 * @see KBASE_CONFIG_ATTR_PM_GPU_POWEROFF_TICK_NS
+	 */
+	KBASE_CONFIG_ATTR_PM_POWEROFF_TICK_GPU,
 
 	/**
 	 * End of attribute list indicator.
 	 * The configuration loader will stop processing any more elements
 	 * when it encounters this attribute.
 	 *
-	 * Attached value: Ignored
 	 * Default value: NA
 	 */
 	KBASE_CONFIG_ATTR_END = 0x1FFFUL
@@ -734,17 +765,6 @@ typedef struct kbase_platform_config {
 const char *kbasep_midgard_type_to_string(u32 midgard_type);
 
 /**
- * @brief Gets the count of attributes in array
- *
- * Function gets the count of attributes in array. Note that end of list indicator is also included.
- *
- * @param[in]  attributes     Array of attributes
-  *
- * @return  Number of attributes in the array including end of list indicator.
- */
-int kbasep_get_config_attribute_count(const kbase_attribute *attributes);
-
-/**
  * @brief Gets the next config attribute with the specified ID from the array of attributes.
  *
  * Function gets the next attribute with specified attribute id within specified array. If no such attribute is found,
@@ -791,7 +811,7 @@ mali_bool kbasep_validate_configuration_attributes(struct kbase_device *kbdev, c
  *
  * @return Pointer to the platform config
  */
-kbase_platform_config *kbasep_get_platform_config(void);
+kbase_platform_config *kbase_get_platform_config(void);
 #endif				/* CONFIG_MALI_PLATFORM_FAKE */
 
 /**

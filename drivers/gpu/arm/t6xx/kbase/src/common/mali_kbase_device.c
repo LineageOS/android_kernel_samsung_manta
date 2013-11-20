@@ -2,11 +2,14 @@
  *
  * (C) COPYRIGHT 2010-2013 ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
 
@@ -30,11 +33,11 @@
  */
 #define TRACE_BUFFER_HEADER_SPECIAL 0x45435254
 
-#ifdef CONFIG_MALI_PLATFORM_CONFIG_VEXPRESS
+#if defined(CONFIG_MALI_PLATFORM_VEXPRESS) || defined(CONFIG_MALI_PLATFORM_VEXPRESS_VIRTEX7_40MHZ)
 #ifdef CONFIG_MALI_PLATFORM_FAKE
 extern kbase_attribute config_attributes_hw_issue_8408[];
 #endif				/* CONFIG_MALI_PLATFORM_FAKE */
-#endif				/* CONFIG_MALI_PLATFORM_CONFIG_VEXPRESS */
+#endif				/* CONFIG_MALI_PLATFORM_VEXPRESS || CONFIG_MALI_PLATFORM_VEXPRESS_VIRTEX7_40MHZ */
 
 #if KBASE_TRACE_ENABLE != 0
 STATIC CONST char *kbasep_trace_code_string[] = {
@@ -85,6 +88,9 @@ mali_error kbase_device_init(kbase_device * const kbdev)
 		kbase_pm_register_access_disable(kbdev);
 		goto free_platform;
 	}
+
+	/* Set the list of features available on the current HW (identified by the GPU_ID register) */
+	kbase_hw_set_features_mask(kbdev);
 
 	kbdev->nr_hw_address_spaces = kbdev->gpu_props.num_address_spaces;
 
@@ -168,18 +174,21 @@ mali_error kbase_device_init(kbase_device * const kbdev)
 #ifdef CONFIG_MALI_TRACE_TIMELINE
 	for (i = 0; i < BASE_JM_SUBMIT_SLOTS; ++i)
 		kbdev->timeline.slot_atoms_submitted[i] = 0;
+
+	for (i = 0; i <= KBASEP_TIMELINE_PM_EVENT_LAST; ++i)
+		atomic_set(&kbdev->timeline.pm_event_uid[i], 0);
 #endif /* CONFIG_MALI_TRACE_TIMELINE */
 
 	kbase_debug_assert_register_hook(&kbasep_trace_hook_wrapper, kbdev);
 
-#ifdef CONFIG_MALI_PLATFORM_CONFIG_VEXPRESS
+#if defined(CONFIG_MALI_PLATFORM_VEXPRESS) || defined(CONFIG_MALI_PLATFORM_VEXPRESS_VIRTEX7_40MHZ)
 #ifdef CONFIG_MALI_PLATFORM_FAKE
 	/* BASE_HW_ISSUE_8408 requires a configuration with different timeouts for
 	 * the vexpress platform */
 	if (kbase_hw_has_issue(kbdev, BASE_HW_ISSUE_8408))
 		kbdev->config_attributes = config_attributes_hw_issue_8408;
 #endif				/* CONFIG_MALI_PLATFORM_FAKE */
-#endif				/* CONFIG_MALI_PLATFORM_CONFIG_VEXPRESS */
+#endif				/* CONFIG_MALI_PLATFORM_VEXPRESS || CONFIG_MALI_PLATFORM_VEXPRESS_VIRTEX7_40MHZ */
 
 	return MALI_ERROR_NONE;
 
@@ -364,8 +373,46 @@ void kbase_gpu_interrupt(kbase_device *kbdev, u32 val)
 	 * further power transitions and we don't want to miss the interrupt raised to notify us that these further
 	 * transitions have finished.
 	 */
-	if (val & POWER_CHANGED_ALL)
-		kbase_pm_check_transitions(kbdev);
+	if (val & POWER_CHANGED_ALL) {
+		mali_bool cores_are_available;
+		unsigned long flags;
+
+		KBASE_TIMELINE_PM_CHECKTRANS(kbdev, SW_FLOW_PM_CHECKTRANS_GPU_INTERRUPT_START);
+		spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
+		cores_are_available = kbase_pm_check_transitions_nolock(kbdev);
+		spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
+		KBASE_TIMELINE_PM_CHECKTRANS(kbdev, SW_FLOW_PM_CHECKTRANS_GPU_INTERRUPT_END);
+
+		if (cores_are_available) {
+			/* Fast-path Job Scheduling on PM IRQ */
+			int js;
+			/* Log timelining information that a change in state has completed */
+			kbase_timeline_pm_handle_event(kbdev, KBASE_TIMELINE_PM_EVENT_GPU_STATE_CHANGED);
+
+			spin_lock_irqsave(&kbdev->js_data.runpool_irq.lock, flags);
+			/* A simplified check to ensure the last context hasn't exited
+			 * after dropping the PM lock whilst doing a PM IRQ: any bits set
+			 * in 'submit_allowed' indicate that we have a context in the
+			 * runpool (which can't leave whilst we hold this lock). It is
+			 * sometimes zero even when we have a context in the runpool, but
+			 * that's no problem because we'll be unable to submit jobs
+			 * anyway */
+			if (kbdev->js_data.runpool_irq.submit_allowed)
+				for (js = 0; js < kbdev->gpu_props.num_job_slots; ++js) {
+					mali_bool needs_retry;
+					s8 submitted_count = 0;
+					needs_retry = kbasep_js_try_run_next_job_on_slot_irq_nolock(kbdev, js, &submitted_count);
+					/* Don't need to retry outside of IRQ context - this can
+					 * only happen if we submitted too many in one IRQ, such
+					 * that they were completing faster than we could
+					 * submit. In this case, a job IRQ will fire to cause more
+					 * work to be submitted in some way */
+					CSTD_UNUSED(needs_retry);
+				}
+			spin_unlock_irqrestore(&kbdev->js_data.runpool_irq.lock, flags);
+		}
+	}
+	KBASE_TRACE_ADD(kbdev, CORE_GPU_IRQ_DONE, NULL, NULL, 0u, val);
 }
 
 /*
@@ -523,8 +570,10 @@ struct trace_seq_state {
 void *kbasep_trace_seq_start(struct seq_file *s, loff_t *pos)
 {
 	struct trace_seq_state *state = s->private;
+	int i;
 
-	if (*pos >= KBASE_TRACE_SIZE)
+	i = (state->start + *pos) & KBASE_TRACE_MASK;
+	if (i >= state-> end)
 		return NULL;
 
 	return state;
@@ -537,11 +586,13 @@ void kbasep_trace_seq_stop(struct seq_file *s, void *data)
 void *kbasep_trace_seq_next(struct seq_file *s, void *data, loff_t *pos)
 {
 	struct trace_seq_state *state = s->private;
-	int i = (state->start + *pos) & KBASE_TRACE_MASK;
-	if (i == state->end)
-		return NULL;
+	int i;
 
 	(*pos)++;
+
+	i = (state->start + *pos) & KBASE_TRACE_MASK;
+	if (i >= state->end)
+		return NULL;
 
 	return &state->trace_buf[i];
 }

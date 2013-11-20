@@ -2,11 +2,14 @@
  *
  * (C) COPYRIGHT 2011 ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
 
@@ -16,7 +19,6 @@
 #include <linux/clk.h>
 #include <kbase/src/common/mali_kbase.h>
 #include <kbase/src/common/mali_kbase_defs.h>
-#include <kbase/src/linux/mali_kbase_config_linux.h>
 #include <mach/map.h>
 #include <plat/devs.h>
 #include <linux/pm_runtime.h>
@@ -164,10 +166,18 @@ void kbase_device_runtime_disable(struct kbase_device *kbdev)
 
 static int pm_callback_runtime_on(kbase_device *kbdev)
 {
+#ifdef CONFIG_MALI_T6XX_DVFS	
+	struct exynos_context *platform = (struct exynos_context *)kbdev->platform_context;
+#endif
 	kbase_platform_clock_on(kbdev);
 #ifdef CONFIG_MALI_T6XX_DVFS
-	if (kbase_platform_dvfs_enable(true, MALI_DVFS_START_FREQ)!= MALI_TRUE)
-		return -EPERM;
+	if (platform->dvfs_enabled) {
+		if (kbase_platform_dvfs_enable(true, MALI_DVFS_START_FREQ)!= MALI_TRUE)
+			return -EPERM;
+	} else {
+		if (kbase_platform_dvfs_enable(false, MALI_DVFS_CURRENT_FREQ)!= MALI_TRUE)
+			return -EPERM;
+	}
 #endif	
 	return 0;
 }
@@ -237,7 +247,12 @@ static kbase_attribute config_attributes[] = {
 	 0}
 };
 
-kbase_platform_config platform_config = {
+kbase_platform_config manta_platform_config = {
 	.attributes = config_attributes,
 	.io_resources = &io_resources
 };
+
+kbase_platform_config *kbase_get_platform_config(void)
+{
+	return &manta_platform_config;
+}

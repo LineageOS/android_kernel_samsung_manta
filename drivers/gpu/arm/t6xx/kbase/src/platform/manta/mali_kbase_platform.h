@@ -30,6 +30,7 @@ struct exynos_context {
 	int utilisation;
 	u32 time_busy;
 	u32 time_idle;
+	bool dvfs_enabled;
 #endif
 };
 

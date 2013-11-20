@@ -2,11 +2,14 @@
  *
  * (C) COPYRIGHT 2011-2013 ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
 
@@ -199,6 +202,12 @@ typedef enum {
 	KBASE_JD_ATOM_STATE_COMPLETED
 } kbase_jd_atom_state;
 
+/** Atom has been previously soft-stoppped */
+#define KBASE_KATOM_FLAG_BEEN_SOFT_STOPPPED (1<<1)
+/** Atom has been previously retried to execute */
+#define KBASE_KATOM_FLAGS_RERUN (1<<2)
+#define KBASE_KATOM_FLAGS_JOBCHAIN (1<<3)
+
 typedef struct kbase_jd_atom kbase_jd_atom;
 
 struct kbase_jd_atom {
@@ -250,7 +259,8 @@ struct kbase_jd_atom {
 #endif
 	/* Assigned after atom is completed. Used to check whether PRLAM-10676 workaround should be applied */
 	int slot_nr;
-	mali_bool been_soft_stoppped;
+
+	u32 atom_flags;
 };
 
 /*
@@ -321,6 +331,7 @@ typedef struct kbase_jm_slot {
 
 	u8 submitted_head;
 	u8 submitted_nr;
+	u8 job_chain_flag;
 
 } kbase_jm_slot;
 
@@ -442,7 +453,7 @@ typedef struct kbase_trace {
 	void *ctx;
 	mali_bool katom;
 	int atom_number;
-	u64 atom_udata[2];	
+	u64 atom_udata[2];
 	u64 gpu_addr;
 	u32 info_val;
 	u8 code;
@@ -451,6 +462,60 @@ typedef struct kbase_trace {
 	u8 flags;
 } kbase_trace;
 
+/** Event IDs for the power management framework.
+ *
+ * Any of these events might be missed, so they should not be relied upon to
+ * find the precise state of the GPU at a particular time in the
+ * trace. Overall, we should get a high percentage of these events for
+ * statisical purposes, and so a few missing should not be a problem */
+typedef enum kbase_timeline_pm_event {
+	/* helper for tests */
+	KBASEP_TIMELINE_PM_EVENT_FIRST,
+
+	/** Event reserved for backwards compatibility with 'init' events */
+	KBASE_TIMELINE_PM_EVENT_RESERVED_0 = KBASEP_TIMELINE_PM_EVENT_FIRST,
+
+	/** The power state of the device has changed.
+	 *
+	 * Specifically, the device has reached a desired or available state.
+	 */
+	KBASE_TIMELINE_PM_EVENT_GPU_STATE_CHANGED,
+
+	/** The GPU is becoming active.
+	 *
+	 * This event is sent when the first context is about to use the GPU.
+	 */
+	KBASE_TIMELINE_PM_EVENT_GPU_ACTIVE,
+
+	/** The GPU is becoming idle.
+	 *
+	 * This event is sent when the last context has finished using the GPU.
+	 */
+	KBASE_TIMELINE_PM_EVENT_GPU_IDLE,
+
+	/** Event reserved for backwards compatibility with 'policy_change'
+	 * events */
+	KBASE_TIMELINE_PM_EVENT_RESERVED_4,
+
+	/** Event reserved for backwards compatibility with 'system_suspend'
+	 * events */
+	KBASE_TIMELINE_PM_EVENT_RESERVED_5,
+
+	/** Event reserved for backwards compatibility with 'system_resume'
+	 * events */
+	KBASE_TIMELINE_PM_EVENT_RESERVED_6,
+
+	/** The job scheduler is requesting to power up/down cores.
+	 *
+	 * This event is sent when:
+	 * - powered down cores are needed to complete a job
+	 * - powered up cores are not needed anymore
+	 */
+	KBASE_TIMELINE_PM_EVENT_CHANGE_GPU_STATE,
+
+	KBASEP_TIMELINE_PM_EVENT_LAST = KBASE_TIMELINE_PM_EVENT_CHANGE_GPU_STATE,
+} kbase_timeline_pm_event;
+
 #ifdef CONFIG_MALI_TRACE_TIMELINE
 typedef struct kbase_trace_kctx_timeline {
 	atomic_t jd_atoms_in_flight;
@@ -458,6 +523,9 @@ typedef struct kbase_trace_kctx_timeline {
 } kbase_trace_kctx_timeline;
 
 typedef struct kbase_trace_kbdev_timeline {
+	/** DebugFS entry */
+	struct dentry *dentry;
+
 	/* Note: strictly speaking, not needed, because it's in sync with
 	 * kbase_device::jm_slots[]::submitted_nr
 	 *
@@ -467,6 +535,15 @@ typedef struct kbase_trace_kbdev_timeline {
 	 * The caller must hold kbasep_js_device_data::runpool_irq::lock when
 	 * accessing this */
 	u8 slot_atoms_submitted[BASE_JM_SUBMIT_SLOTS];
+
+	/* Last UID for each PM event */
+	atomic_t pm_event_uid[KBASEP_TIMELINE_PM_EVENT_LAST+1];
+	/* Counter for generating PM event UIDs */
+	atomic_t pm_event_uid_counter;
+	/*
+	 * L2 transition state - MALI_TRUE indicates that the transition is ongoing
+	 * Expected to be protected by pm.power_change_lock */
+	mali_bool l2_transitioning;
 } kbase_trace_kbdev_timeline;
 #endif /* CONFIG_MALI_TRACE_TIMELINE */
 
@@ -493,6 +570,8 @@ struct kbase_device {
 
 	/** List of SW workarounds for HW issues */
 	unsigned long hw_issues_mask[(BASE_HW_ISSUE_END + BITS_PER_LONG - 1) / BITS_PER_LONG];
+	/** List of features available */
+	unsigned long hw_features_mask[(BASE_HW_FEATURE_END + BITS_PER_LONG - 1) / BITS_PER_LONG];
 
 	/* Cached present bitmaps - these are the same as the corresponding hardware registers */
 	u64 shader_present_bitmap;
@@ -505,22 +584,23 @@ struct kbase_device {
 	 *
 	 * pm.power_change_lock should be held when accessing these members.
 	 *
-	 * kbase_pm_check_transitions should be called when bits are cleared to
-	 * update the power management system and allow transitions to occur. */
+	 * kbase_pm_check_transitions_nolock() should be called when bits are
+	 * cleared to update the power management system and allow transitions to
+	 * occur. */
 	u64 shader_inuse_bitmap;
-	u64 tiler_inuse_bitmap;
 
 	/* Refcount for cores in use */
 	u32 shader_inuse_cnt[64];
-	u32 tiler_inuse_cnt[64];
 
 	/* Bitmaps of cores the JS needs for jobs ready to run */
 	u64 shader_needed_bitmap;
-	u64 tiler_needed_bitmap;
 
 	/* Refcount for cores needed */
 	u32 shader_needed_cnt[64];
-	u32 tiler_needed_cnt[64];
+
+	u32 tiler_inuse_cnt;
+
+	u32 tiler_needed_cnt;
 
 	/* Refcount for tracking users of the l2 cache, e.g. when using hardware counter instrumentation. */
 	u32 l2_users_count;
@@ -533,6 +613,10 @@ struct kbase_device {
 	 */
 	u64 shader_available_bitmap;
 	u64 tiler_available_bitmap;
+	u64 l2_available_bitmap;
+
+	u64 shader_ready_bitmap;
+	u64 shader_transitioning_bitmap;
 
 	s8 nr_hw_address_spaces;			  /**< Number of address spaces in the GPU (constant after driver initialisation) */
 	s8 nr_user_address_spaces;			  /**< Number of address spaces available to user contexts */
@@ -574,13 +658,6 @@ struct kbase_device {
 	atomic_t irq_throttle_cycles;
 
 	const kbase_attribute *config_attributes;
-
-	/* >> BASE_HW_ISSUE_8401 >> */
-#define KBASE_8401_WORKAROUND_COMPUTEJOB_COUNT 3
-	kbase_context *workaround_kctx;
-	void *workaround_compute_job_va[KBASE_8401_WORKAROUND_COMPUTEJOB_COUNT];
-	phys_addr_t workaround_compute_job_pa[KBASE_8401_WORKAROUND_COMPUTEJOB_COUNT];
-	/* << BASE_HW_ISSUE_8401 << */
 
 #if KBASE_TRACE_ENABLE != 0
 	spinlock_t              trace_lock;
@@ -678,6 +755,7 @@ struct kbase_context {
 	 * All other flags must be added there */
 	spinlock_t         mm_update_lock;
 	struct mm_struct * process_mm;
+	pid_t              pid;
 
 #ifdef CONFIG_MALI_TRACE_TIMELINE
 	kbase_trace_kctx_timeline timeline;

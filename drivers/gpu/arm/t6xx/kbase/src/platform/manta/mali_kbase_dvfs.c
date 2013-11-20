@@ -271,18 +271,6 @@ int kbase_platform_dvfs_enable(bool enable, int freq)
 
 	mutex_lock(&mali_enable_clock_lock);
 
-	if (freq != MALI_DVFS_CURRENT_FREQ) {
-		spin_lock_irqsave(&mali_dvfs_spinlock, flags);
-		platform->time_tick = 0;
-		platform->time_busy = 0;
-		platform->time_idle = 0;
-		platform->utilisation = 0;
-		dvfs_status->step = kbase_platform_dvfs_get_level(freq);
-		spin_unlock_irqrestore(&mali_dvfs_spinlock, flags);
-
-		kbase_platform_dvfs_set_level(dvfs_status->kbdev, dvfs_status->step);
- 	}
- 
 	if (enable != kbdev->pm.metrics.timer_active) {
 		if (enable) {
 			spin_lock_irqsave(&kbdev->pm.metrics.lock, flags);
@@ -301,6 +289,19 @@ int kbase_platform_dvfs_enable(bool enable, int freq)
 			exynos5_bus_mif_update(mem_freq_req, 0);
 		}
 	}
+
+	if (freq != MALI_DVFS_CURRENT_FREQ) {
+		spin_lock_irqsave(&mali_dvfs_spinlock, flags);
+		platform->time_tick = 0;
+		platform->time_busy = 0;
+		platform->time_idle = 0;
+		platform->utilisation = 0;
+		dvfs_status->step = kbase_platform_dvfs_get_level(freq);
+		spin_unlock_irqrestore(&mali_dvfs_spinlock, flags);
+
+		kbase_platform_dvfs_set_level(dvfs_status->kbdev, dvfs_status->step);
+ 	}
+ 
 	mutex_unlock(&mali_enable_clock_lock);
 
 	return MALI_TRUE;
@@ -361,11 +362,12 @@ static int kbase_platform_dvfs_get_bw(int level)
 int mali_get_dvfs_upper_locked_freq(void)
 {
 	unsigned long flags;
-	unsigned int locked_level = -1;
+	int locked_level = -1;
 
 #ifdef CONFIG_MALI_T6XX_FREQ_LOCK
 	spin_lock_irqsave(&mali_dvfs_spinlock, flags);
-	locked_level = mali_dvfs_infotbl[mali_dvfs_status_current.upper_lock].clock;
+	if (mali_dvfs_status_current.upper_lock >= 0)
+		locked_level = mali_dvfs_infotbl[mali_dvfs_status_current.upper_lock].clock;
 	spin_unlock_irqrestore(&mali_dvfs_spinlock, flags);
 #endif
 	return locked_level;
@@ -374,11 +376,12 @@ int mali_get_dvfs_upper_locked_freq(void)
 int mali_get_dvfs_under_locked_freq(void)
 {
 	unsigned long flags;
-	unsigned int locked_level = -1;
+	int locked_level = -1;
 
 #ifdef CONFIG_MALI_T6XX_FREQ_LOCK
 	spin_lock_irqsave(&mali_dvfs_spinlock, flags);
-	locked_level = mali_dvfs_infotbl[mali_dvfs_status_current.under_lock].clock;
+	if (mali_dvfs_status_current.under_lock >= 0)
+		locked_level = mali_dvfs_infotbl[mali_dvfs_status_current.under_lock].clock;
 	spin_unlock_irqrestore(&mali_dvfs_spinlock, flags);
 #endif
 	return locked_level;
@@ -387,7 +390,7 @@ int mali_get_dvfs_under_locked_freq(void)
 int mali_get_dvfs_current_level(void)
 {
 	unsigned long flags;
-	unsigned int current_level = -1;
+	int current_level = -1;
 
 #ifdef CONFIG_MALI_T6XX_FREQ_LOCK
 	spin_lock_irqsave(&mali_dvfs_spinlock, flags);
@@ -402,8 +405,8 @@ int mali_dvfs_freq_lock(int level)
 	unsigned long flags;
 #ifdef CONFIG_MALI_T6XX_FREQ_LOCK
 	spin_lock_irqsave(&mali_dvfs_spinlock, flags);
-	if (mali_dvfs_status_current.under_lock >= 0) {
-		printk(KERN_ERR "[G3D] Upper lock Error : Under lock is already set\n");
+	if (mali_dvfs_status_current.under_lock >= 0 && mali_dvfs_status_current.under_lock > level) {
+		printk(KERN_ERR "[G3D] Upper lock Error : Attempting to set upper lock to below under lock\n");
 		spin_unlock_irqrestore(&mali_dvfs_spinlock, flags);
 		return -1;
 	}
@@ -431,8 +434,8 @@ int mali_dvfs_freq_under_lock(int level)
 	unsigned long flags;
 #ifdef CONFIG_MALI_T6XX_FREQ_LOCK
 	spin_lock_irqsave(&mali_dvfs_spinlock, flags);
-	if (mali_dvfs_status_current.upper_lock >= 0) {
-		printk(KERN_ERR "[G3D] Under lock Error : Upper lock is already set\n");
+	if (mali_dvfs_status_current.upper_lock >= 0 && mali_dvfs_status_current.upper_lock < level) {
+		printk(KERN_ERR "[G3D] Under lock Error : Attempting to set under lock to above upper lock\n");
 		spin_unlock_irqrestore(&mali_dvfs_spinlock, flags);
 		return -1;
 	}
@@ -572,7 +575,7 @@ void kbase_platform_dvfs_set_clock(kbase_device *kbdev, int freq)
 			panic("clk_get ERROR");
 	}
 
-	if (platform->sclk_g3d == 0)
+	if (platform->sclk_g3d == 0) 
 		return;
 
 	if (freq == _freq)
@@ -670,6 +673,12 @@ void kbase_platform_dvfs_set_level(kbase_device *kbdev, int level)
 	if (WARN_ON((level >= MALI_DVFS_STEP) || (level < 0)))
 		panic("invalid level");
 
+	if (mali_dvfs_status_current.upper_lock >= 0 && level > mali_dvfs_status_current.upper_lock)
+		level = mali_dvfs_status_current.upper_lock;
+
+	if (mali_dvfs_status_current.under_lock >= 0 && level < mali_dvfs_status_current.under_lock)
+		level = mali_dvfs_status_current.under_lock;
+
 #ifdef CONFIG_MALI_T6XX_DVFS
 	mutex_lock(&mali_set_clock_lock);
 #endif
@@ -731,6 +740,9 @@ static void update_time_in_state(int level)
 {
 	u64 current_time;
 	static u64 prev_time=0;
+
+	if (level < 0)
+		return;
 
 	if (!kbase_platform_dvfs_get_enable_status())
 		return;

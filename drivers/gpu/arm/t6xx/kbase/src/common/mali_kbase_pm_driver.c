@@ -2,11 +2,14 @@
  *
  * (C) COPYRIGHT 2010-2013 ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
 
@@ -75,6 +78,8 @@ STATIC void kbase_pm_invoke(kbase_device *kbdev, kbase_pm_core_type core_type, u
 	u32 lo = cores & 0xFFFFFFFF;
 	u32 hi = (cores >> 32) & 0xFFFFFFFF;
 
+	lockdep_assert_held(&kbdev->pm.power_change_lock);
+
 	reg = core_type_to_reg(core_type, action);
 
 	KBASE_DEBUG_ASSERT(reg);
@@ -87,11 +92,37 @@ STATIC void kbase_pm_invoke(kbase_device *kbdev, kbase_pm_core_type core_type, u
 	}
 #endif				/* CONFIG_MALI_GATOR_SUPPORT */
 	/* Tracing */
-	if (cores != 0 && core_type == KBASE_PM_CORE_SHADER) {
+	if (cores) {
 		if (action == ACTION_PWRON)
-			KBASE_TRACE_ADD(kbdev, PM_PWRON, NULL, NULL, 0u, lo);
+			switch (core_type) {
+				case KBASE_PM_CORE_SHADER:
+					KBASE_TRACE_ADD(kbdev, PM_PWRON, NULL, NULL, 0u, lo);
+					break;
+				case KBASE_PM_CORE_TILER:
+					KBASE_TRACE_ADD(kbdev, PM_PWRON_TILER, NULL, NULL, 0u, lo);
+					break;
+				case KBASE_PM_CORE_L2:
+					KBASE_TRACE_ADD(kbdev, PM_PWRON_L2, NULL, NULL, 0u, lo);
+					break;
+				default:
+					/* L3 not handled */
+					break;
+			}
 		else if (action == ACTION_PWROFF)
-			KBASE_TRACE_ADD(kbdev, PM_PWROFF, NULL, NULL, 0u, lo);
+			switch (core_type) {
+				case KBASE_PM_CORE_SHADER:
+					KBASE_TRACE_ADD(kbdev, PM_PWROFF, NULL, NULL, 0u, lo);
+					break;
+				case KBASE_PM_CORE_TILER:
+					KBASE_TRACE_ADD(kbdev, PM_PWROFF_TILER, NULL, NULL, 0u, lo);
+					break;
+				case KBASE_PM_CORE_L2:
+					KBASE_TRACE_ADD(kbdev, PM_PWROFF_L2, NULL, NULL, 0u, lo);
+					break;
+				default:
+					/* L3 not handled */
+					break;
+			}
 	}
 
 	if (lo != 0)
@@ -101,81 +132,6 @@ STATIC void kbase_pm_invoke(kbase_device *kbdev, kbase_pm_core_type core_type, u
 		kbase_reg_write(kbdev, GPU_CONTROL_REG(reg + 4), hi, NULL);
 }
 
-void kbase_pm_invoke_power_up(kbase_device *kbdev, kbase_pm_core_type type, u64 cores)
-{
-	KBASE_DEBUG_ASSERT(kbdev != NULL);
-
-	switch (type) {
-	case KBASE_PM_CORE_SHADER:
-		{
-			u64 prev_desired_shader = kbdev->pm.desired_shader_state;
-			kbdev->pm.desired_shader_state |= cores;
-			if (prev_desired_shader != kbdev->pm.desired_shader_state)
-				KBASE_TRACE_ADD(kbdev, PM_CORES_CHANGE_DESIRED_ON_POWERUP, NULL, NULL, 0u, (u32) kbdev->pm.desired_shader_state);
-		}
-		break;
-	case KBASE_PM_CORE_TILER:
-		kbdev->pm.desired_tiler_state |= cores;
-		break;
-	default:
-		KBASE_DEBUG_ASSERT(0);
-	}
-}
-
-KBASE_EXPORT_TEST_API(kbase_pm_invoke_power_up)
-
-void kbase_pm_invoke_power_down(kbase_device *kbdev, kbase_pm_core_type type, u64 cores)
-{
-	unsigned long flags;
-	KBASE_DEBUG_ASSERT(kbdev != NULL);
-
-	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
-
-	switch (type) {
-	case KBASE_PM_CORE_SHADER:
-		{
-			u64 shader_available_bitmap = kbdev->shader_available_bitmap;
-			u64 prev_desired_shader = kbdev->pm.desired_shader_state;
-
-			kbdev->pm.desired_shader_state &= ~cores;
-
-			if (prev_desired_shader != kbdev->pm.desired_shader_state)
-				KBASE_TRACE_ADD(kbdev, PM_CORES_CHANGE_DESIRED_ON_POWERDOWN, NULL, NULL, 0u, (u32) kbdev->pm.desired_shader_state);
-
-			/* Also remove the cores from the available set to prevent job submission to
-			 * these cores before the next call to kbase_pm_check_transitions */
-			kbdev->shader_available_bitmap &= ~cores;
-
-			if (kbdev->shader_available_bitmap != shader_available_bitmap)
-			{
-				KBASE_TRACE_ADD(kbdev, PM_CORES_CHANGE_AVAILABLE, NULL, NULL, 0u, (u32) kbdev->shader_available_bitmap);
-				KBASE_TIMELINE_POWER_SHADER(kbdev, kbdev->shader_available_bitmap);
-			}
-
-		}
-		break;
-	case KBASE_PM_CORE_TILER:
-		{
-			u64 tiler_available_bitmap = kbdev->tiler_available_bitmap;
-
-			kbdev->pm.desired_tiler_state &= ~cores;
-			kbdev->tiler_available_bitmap &= ~cores;
-
-			if (kbdev->tiler_available_bitmap != tiler_available_bitmap)
-			{
-				KBASE_TIMELINE_POWER_TILER(kbdev, kbdev->tiler_available_bitmap);
-			}
-		}
-
-		break;
-	default:
-		KBASE_DEBUG_ASSERT(0);
-	}
-
-	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
-}
-
-KBASE_EXPORT_TEST_API(kbase_pm_invoke_power_down)
 /** Get information about a core set
  *
  * This function gets information (chosen by \c action) about a set of cores of a type given by \c core_type. It is a
@@ -211,15 +167,15 @@ void kbasep_pm_read_present_cores(kbase_device *kbdev)
 	kbdev->l3_present_bitmap = kbase_pm_get_state(kbdev, KBASE_PM_CORE_L3, ACTION_PRESENT);
 
 	kbdev->shader_inuse_bitmap = 0;
-	kbdev->tiler_inuse_bitmap = 0;
 	kbdev->shader_needed_bitmap = 0;
-	kbdev->tiler_needed_bitmap = 0;
 	kbdev->shader_available_bitmap = 0;
 	kbdev->tiler_available_bitmap = 0;
 	kbdev->l2_users_count = 0;
+	kbdev->l2_available_bitmap = 0;
+	kbdev->tiler_needed_cnt = 0;
+	kbdev->tiler_inuse_cnt = 0;
 
 	memset(kbdev->shader_needed_cnt, 0, sizeof(kbdev->shader_needed_cnt));
-	memset(kbdev->tiler_needed_cnt, 0, sizeof(kbdev->tiler_needed_cnt));
 }
 
 KBASE_EXPORT_TEST_API(kbasep_pm_read_present_cores)
@@ -261,7 +217,7 @@ KBASE_EXPORT_TEST_API(kbase_pm_get_active_cores)
 
 /** Get the cores that are transitioning between power states
  */
-u64 MOCKABLE(kbase_pm_get_trans_cores) (kbase_device *kbdev, kbase_pm_core_type type)
+u64 kbase_pm_get_trans_cores(kbase_device *kbdev, kbase_pm_core_type type)
 {
 	return kbase_pm_get_state(kbdev, type, ACTION_PWRTRANS);
 }
@@ -274,25 +230,25 @@ u64 kbase_pm_get_ready_cores(kbase_device *kbdev, kbase_pm_core_type type)
 	u64 result;
 	result = kbase_pm_get_state(kbdev, type, ACTION_READY);
 
-	if (type == KBASE_PM_CORE_SHADER)
-		KBASE_TRACE_ADD(kbdev, PM_CORES_POWERED, NULL, NULL, 0u, (u32) result);
+	switch (type) {
+		case KBASE_PM_CORE_SHADER:
+			KBASE_TRACE_ADD(kbdev, PM_CORES_POWERED, NULL, NULL, 0u, (u32) result);
+			break;
+		case KBASE_PM_CORE_TILER:
+			KBASE_TRACE_ADD(kbdev, PM_CORES_POWERED_TILER, NULL, NULL, 0u, (u32) result);
+			break;
+		case KBASE_PM_CORE_L2:
+			KBASE_TRACE_ADD(kbdev, PM_CORES_POWERED_L2, NULL, NULL, 0u, (u32) result);
+			break;
+		default:
+			/* NB: L3 not currently traced */
+			break;
+	}
 
 	return result;
 }
 
 KBASE_EXPORT_TEST_API(kbase_pm_get_ready_cores)
-
-/** Is there an active power transition?
- *
- * Returns true if there is a power transition in progress, otherwise false.
- */
-mali_bool MOCKABLE(kbase_pm_get_pwr_active) (kbase_device *kbdev)
-{
-	mali_bool state = atomic_read(&kbdev->pm.gpu_in_desired_state);
-	return !state;
-}
-
-KBASE_EXPORT_TEST_API(kbase_pm_get_pwr_active)
 
 /** Perform power transitions for a particular core type.
  *
@@ -322,6 +278,9 @@ STATIC mali_bool kbase_pm_transition_core_type(kbase_device *kbdev, kbase_pm_cor
 	u64 powerup;
 	u64 powerdown;
 	u64 powering_on_trans;
+	u64 desired_state_in_use;
+
+	lockdep_assert_held(&kbdev->pm.power_change_lock);
 
 	/* Get current state */
 	present = kbase_pm_get_present_cores(kbdev, type);
@@ -330,17 +289,18 @@ STATIC mali_bool kbase_pm_transition_core_type(kbase_device *kbdev, kbase_pm_cor
 
 	powering_on_trans = trans & *powering_on;
 	*powering_on = powering_on_trans;
+
 	if (available != NULL)
 		*available = (ready | powering_on_trans) & desired_state;
 
 	/* Update desired state to include the in-use cores. These have to be kept powered up because there are jobs
 	 * running or about to run on these cores
 	 */
-	desired_state |= in_use;
+	desired_state_in_use = desired_state | in_use;
 
 	/* Update state of whether l2 caches are powered */
 	if (type == KBASE_PM_CORE_L2) {
-		if ((ready == present) && (desired_state == ready) && (trans == 0)) {
+		if ((ready == present) && (desired_state_in_use == ready) && (trans == 0)) {
 			/* All are ready, none will be turned off, and none are transitioning */
 			kbdev->pm.l2_powered = 1;
 			if (kbdev->l2_users_count > 0) {
@@ -352,20 +312,33 @@ STATIC mali_bool kbase_pm_transition_core_type(kbase_device *kbdev, kbase_pm_cor
 		}
 	}
 
-	if (desired_state == ready && (trans == 0))
+	if (desired_state_in_use == ready && (trans == 0))
 		return MALI_TRUE;
 
 	/* Restrict the cores to those that are actually present */
-	powerup = desired_state & present;
-	powerdown = (~desired_state) & present;
+	powerup = desired_state_in_use & present;
+	powerdown = (~desired_state_in_use) & present;
 
 	/* Restrict to cores that are not already in the desired state */
 	powerup &= ~ready;
 	powerdown &= ready;
 
-	/* Don't transition any cores that are already transitioning */
-	powerup &= ~trans;
+	/* Don't transition any cores that are already transitioning, except for
+	 * Mali cores that support the following case:
+	 *
+	 * If the SHADER_PWRON or TILER_PWRON registers are written to turn on
+	 * a core that is currently transitioning to power off, then this is 
+	 * remembered and the shader core is automatically powered up again once
+	 * the original transition completes. Once the automatic power on is
+	 * complete any job scheduled on the shader core should start.
+	 */
 	powerdown &= ~trans;
+
+	if (kbase_hw_has_feature(kbdev, BASE_HW_FEATURE_PWRON_DURING_PWROFF_TRANS))
+		if (KBASE_PM_CORE_SHADER == type || KBASE_PM_CORE_TILER == type)
+			trans = powering_on_trans; /* for exception cases, only mask off cores in power on transitions */
+
+	powerup &= ~trans;
 
 	/* Perform transitions if any */
 	kbase_pm_invoke(kbdev, type, powerup, ACTION_PWRON);
@@ -418,325 +391,42 @@ STATIC u64 get_desired_cache_status(u64 present, u64 cores_powered)
 }
 
 KBASE_EXPORT_TEST_API(get_desired_cache_status)
-static mali_bool kbasep_pm_unrequest_cores_nolock(kbase_device *kbdev, u64 shader_cores, u64 tiler_cores)
+
+mali_bool MOCKABLE(kbase_pm_check_transitions_nolock) (struct kbase_device *kbdev)
 {
-	mali_bool change_gpu_state = MALI_FALSE;
-
-	KBASE_DEBUG_ASSERT(kbdev != NULL);
-
-	while (shader_cores) {
-		int bitnum = fls64(shader_cores) - 1;
-		u64 bit = 1ULL << bitnum;
-		int cnt;
-
-		KBASE_DEBUG_ASSERT(kbdev->shader_needed_cnt[bitnum] > 0);
-
-		cnt = --kbdev->shader_needed_cnt[bitnum];
-
-		if (0 == cnt) {
-			kbdev->shader_needed_bitmap &= ~bit;
-			change_gpu_state = MALI_TRUE;
-		}
-
-		shader_cores &= ~bit;
-	}
-
-	if (change_gpu_state)
-		KBASE_TRACE_ADD(kbdev, PM_UNREQUEST_CHANGE_SHADER_NEEDED, NULL, NULL, 0u, (u32) kbdev->shader_needed_bitmap);
-
-	while (tiler_cores) {
-		int bitnum = fls64(tiler_cores) - 1;
-		u64 bit = 1ULL << bitnum;
-		int cnt;
-
-		KBASE_DEBUG_ASSERT(kbdev->tiler_needed_cnt[bitnum] > 0);
-
-		cnt = --kbdev->tiler_needed_cnt[bitnum];
-
-		if (0 == cnt) {
-			kbdev->tiler_needed_bitmap &= ~bit;
-			change_gpu_state = MALI_TRUE;
-		}
-
-		tiler_cores &= ~bit;
-	}
-
-	return change_gpu_state;
-}
-
-mali_error kbase_pm_request_cores(kbase_device *kbdev, u64 shader_cores, u64 tiler_cores)
-{
-	unsigned long flags;
-	u64 cores;
-
-	mali_bool change_gpu_state = MALI_FALSE;
-
-	KBASE_DEBUG_ASSERT(kbdev != NULL);
-
-	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
-
-	cores = shader_cores;
-	while (cores) {
-		int bitnum = fls64(cores) - 1;
-		u64 bit = 1ULL << bitnum;
-
-		int cnt = ++kbdev->shader_needed_cnt[bitnum];
-
-		if (0 == cnt) {
-			/* Wrapped, undo everything we've done so far */
-
-			kbdev->shader_needed_cnt[bitnum]--;
-			kbasep_pm_unrequest_cores_nolock(kbdev, cores ^ shader_cores, 0);
-
-			spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
-			return MALI_ERROR_FUNCTION_FAILED;
-		}
-
-		if (1 == cnt) {
-			kbdev->shader_needed_bitmap |= bit;
-			change_gpu_state = MALI_TRUE;
-		}
-
-		cores &= ~bit;
-	}
-
-	if (change_gpu_state)
-		KBASE_TRACE_ADD(kbdev, PM_REQUEST_CHANGE_SHADER_NEEDED, NULL, NULL, 0u, (u32) kbdev->shader_needed_bitmap);
-
-	cores = tiler_cores;
-	while (cores) {
-		int bitnum = fls64(cores) - 1;
-		u64 bit = 1ULL << bitnum;
-
-		int cnt = ++kbdev->tiler_needed_cnt[bitnum];
-
-		if (0 == cnt) {
-			/* Wrapped, undo everything we've done so far */
-
-			kbdev->tiler_needed_cnt[bitnum]--;
-			kbasep_pm_unrequest_cores_nolock(kbdev, shader_cores, cores ^ tiler_cores);
-
-			spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
-			return MALI_ERROR_FUNCTION_FAILED;
-		}
-
-		if (1 == cnt) {
-			kbdev->tiler_needed_bitmap |= bit;
-			change_gpu_state = MALI_TRUE;
-		}
-
-		cores &= ~bit;
-	}
-
-	if (change_gpu_state)
-		kbase_pm_send_event(kbdev, KBASE_PM_EVENT_CHANGE_GPU_STATE);
-
-	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
-
-	return MALI_ERROR_NONE;
-}
-
-KBASE_EXPORT_TEST_API(kbase_pm_request_cores)
-
-void kbase_pm_unrequest_cores(kbase_device *kbdev, u64 shader_cores, u64 tiler_cores)
-{
-	unsigned long flags;
-	mali_bool change_gpu_state = MALI_FALSE;
-
-	KBASE_DEBUG_ASSERT(kbdev != NULL);
-
-	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
-
-	change_gpu_state = kbasep_pm_unrequest_cores_nolock(kbdev, shader_cores, tiler_cores);
-
-	if (change_gpu_state)
-		kbase_pm_send_event(kbdev, KBASE_PM_EVENT_CHANGE_GPU_STATE);
-
-	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
-}
-
-KBASE_EXPORT_TEST_API(kbase_pm_unrequest_cores)
-
-mali_bool kbase_pm_register_inuse_cores(kbase_device *kbdev, u64 shader_cores, u64 tiler_cores)
-{
-	unsigned long flags;
-	u64 prev_shader_needed;	/* Just for tracing */
-	u64 prev_shader_inuse;	/* Just for tracing */
-
-	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
-
-	prev_shader_needed = kbdev->shader_needed_bitmap;
-	prev_shader_inuse = kbdev->shader_inuse_bitmap;
-
-	if ((kbdev->shader_available_bitmap & shader_cores) != shader_cores || (kbdev->tiler_available_bitmap & tiler_cores) != tiler_cores) {
-		spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
-		return MALI_FALSE;
-	}
-
-	while (shader_cores) {
-		int bitnum = fls64(shader_cores) - 1;
-		u64 bit = 1ULL << bitnum;
-		int cnt;
-
-		KBASE_DEBUG_ASSERT(kbdev->shader_needed_cnt[bitnum] > 0);
-
-		cnt = --kbdev->shader_needed_cnt[bitnum];
-
-		if (0 == cnt)
-			kbdev->shader_needed_bitmap &= ~bit;
-
-		/* shader_inuse_cnt should not overflow because there can only be a
-		 * very limited number of jobs on the h/w at one time */
-
-		kbdev->shader_inuse_cnt[bitnum]++;
-		kbdev->shader_inuse_bitmap |= bit;
-
-		shader_cores &= ~bit;
-	}
-
-	if (prev_shader_needed != kbdev->shader_needed_bitmap)
-		KBASE_TRACE_ADD(kbdev, PM_REGISTER_CHANGE_SHADER_NEEDED, NULL, NULL, 0u, (u32) kbdev->shader_needed_bitmap);
-
-	if (prev_shader_inuse != kbdev->shader_inuse_bitmap)
-		KBASE_TRACE_ADD(kbdev, PM_REGISTER_CHANGE_SHADER_INUSE, NULL, NULL, 0u, (u32) kbdev->shader_inuse_bitmap);
-
-	while (tiler_cores) {
-		int bitnum = fls64(tiler_cores) - 1;
-		u64 bit = 1ULL << bitnum;
-		int cnt;
-
-		KBASE_DEBUG_ASSERT(kbdev->tiler_needed_cnt[bitnum] > 0);
-
-		cnt = --kbdev->tiler_needed_cnt[bitnum];
-
-		if (0 == cnt)
-			kbdev->tiler_needed_bitmap &= ~bit;
-
-		/* tiler_inuse_cnt should not overflow because there can only be a
-		 * very limited number of jobs on the h/w at one time */
-
-		kbdev->tiler_inuse_cnt[bitnum]++;
-		kbdev->tiler_inuse_bitmap |= bit;
-
-		tiler_cores &= ~bit;
-	}
-
-	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
-
-	return MALI_TRUE;
-}
-
-KBASE_EXPORT_TEST_API(kbase_pm_register_inuse_cores)
-
-void kbase_pm_request_l2_caches(kbase_device *kbdev)
-{
-	unsigned long flags;
-	u32 prior_l2_users_count;
-	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
-
-	prior_l2_users_count = kbdev->l2_users_count++;
-
-	KBASE_DEBUG_ASSERT(kbdev->l2_users_count != 0);
-
-	if (!prior_l2_users_count)
-		kbase_pm_send_event(kbdev, KBASE_PM_EVENT_CHANGE_GPU_STATE);
-
-	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
-	wait_event(kbdev->pm.l2_powered_wait, kbdev->pm.l2_powered == 1);
-}
-
-KBASE_EXPORT_TEST_API(kbase_pm_request_l2_caches)
-
-void kbase_pm_release_l2_caches(kbase_device *kbdev)
-{
-	unsigned long flags;
-	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
-
-	KBASE_DEBUG_ASSERT(kbdev->l2_users_count > 0);
-
-	--kbdev->l2_users_count;
-
-	if (!kbdev->l2_users_count)
-		kbase_pm_send_event(kbdev, KBASE_PM_EVENT_CHANGE_GPU_STATE);
-
-	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
-}
-
-KBASE_EXPORT_TEST_API(kbase_pm_release_l2_caches)
-
-void kbase_pm_release_cores(kbase_device *kbdev, u64 shader_cores, u64 tiler_cores)
-{
-	unsigned long flags;
-	mali_bool change_gpu_state = MALI_FALSE;
-
-	KBASE_DEBUG_ASSERT(kbdev != NULL);
-
-	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
-
-	while (shader_cores) {
-		int bitnum = fls64(shader_cores) - 1;
-		u64 bit = 1ULL << bitnum;
-		int cnt;
-
-		KBASE_DEBUG_ASSERT(kbdev->shader_inuse_cnt[bitnum] > 0);
-
-		cnt = --kbdev->shader_inuse_cnt[bitnum];
-
-		if (0 == cnt) {
-			kbdev->shader_inuse_bitmap &= ~bit;
-			change_gpu_state = MALI_TRUE;
-		}
-
-		shader_cores &= ~bit;
-	}
-
-	if (change_gpu_state)
-		KBASE_TRACE_ADD(kbdev, PM_RELEASE_CHANGE_SHADER_INUSE, NULL, NULL, 0u, (u32) kbdev->shader_inuse_bitmap);
-
-	while (tiler_cores) {
-		int bitnum = fls64(tiler_cores) - 1;
-		u64 bit = 1ULL << bitnum;
-		int cnt;
-
-		KBASE_DEBUG_ASSERT(kbdev->tiler_inuse_cnt[bitnum] > 0);
-
-		cnt = --kbdev->tiler_inuse_cnt[bitnum];
-
-		if (0 == cnt) {
-			kbdev->tiler_inuse_bitmap &= ~bit;
-			change_gpu_state = MALI_TRUE;
-		}
-
-		tiler_cores &= ~bit;
-	}
-
-	if (change_gpu_state)
-		kbase_pm_send_event(kbdev, KBASE_PM_EVENT_CHANGE_GPU_STATE);
-
-	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
-}
-
-KBASE_EXPORT_TEST_API(kbase_pm_release_cores)
-
-void MOCKABLE(kbase_pm_check_transitions) (kbase_device *kbdev)
-{
-	unsigned long flags;
+	mali_bool cores_are_available = MALI_FALSE;
 	mali_bool in_desired_state = MALI_TRUE;
 	u64 desired_l2_state;
 	u64 desired_l3_state;
 	u64 cores_powered;
 	u64 tiler_available_bitmap;
 	u64 shader_available_bitmap;
+	u64 shader_ready_bitmap;
+	u64 shader_transitioning_bitmap;
+	u64 l2_available_bitmap;
 
 	KBASE_DEBUG_ASSERT(NULL != kbdev);
+	lockdep_assert_held(&kbdev->pm.power_change_lock);
 
-	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
+	spin_lock(&kbdev->pm.gpu_powered_lock);
+	if (kbdev->pm.gpu_powered == MALI_FALSE) {
+		spin_unlock(&kbdev->pm.gpu_powered_lock);
+		if (kbdev->pm.desired_shader_state == 0 && kbdev->pm.desired_tiler_state == 0)
+			return MALI_TRUE;
+		return MALI_FALSE;
+	}
+
+	/* Trace that a change-state is being requested, and that it took
+	 * (effectively) no time to start it. This is useful for counting how many
+	 * state changes occurred, in a way that's backwards-compatible with
+	 * processing the trace data */
+	kbase_timeline_pm_send_event(kbdev, KBASE_TIMELINE_PM_EVENT_CHANGE_GPU_STATE);
+	kbase_timeline_pm_handle_event(kbdev, KBASE_TIMELINE_PM_EVENT_CHANGE_GPU_STATE);
 
 	/* If any cores are already powered then, we must keep the caches on */
-	cores_powered = kbase_pm_get_ready_cores(kbdev, KBASE_PM_CORE_TILER);
-	cores_powered |= kbase_pm_get_ready_cores(kbdev, KBASE_PM_CORE_SHADER);
+	cores_powered = kbase_pm_get_ready_cores(kbdev, KBASE_PM_CORE_SHADER);
 
-	cores_powered |= (kbdev->pm.desired_shader_state | kbdev->pm.desired_tiler_state);
+	cores_powered |= kbdev->pm.desired_shader_state;
 
 	/* If there are l2 cache users registered, keep all l2s powered even if all other cores are off. */
 	if (kbdev->l2_users_count > 0)
@@ -745,51 +435,150 @@ void MOCKABLE(kbase_pm_check_transitions) (kbase_device *kbdev)
 	desired_l2_state = get_desired_cache_status(kbdev->l2_present_bitmap, cores_powered);
 
 	/* If any l2 cache is on, then enable l2 #0, for use by job manager */
-	if (0 != desired_l2_state)
+	if (0 != desired_l2_state) {
 		desired_l2_state |= 1;
+		/* Also enable tiler if l2 cache is powered */
+		kbdev->pm.desired_tiler_state = kbdev->tiler_present_bitmap;
+	} else {
+		kbdev->pm.desired_tiler_state = 0;
+	}
 
 	desired_l3_state = get_desired_cache_status(kbdev->l3_present_bitmap, desired_l2_state);
 
 	in_desired_state &= kbase_pm_transition_core_type(kbdev, KBASE_PM_CORE_L3, desired_l3_state, 0, NULL, &kbdev->pm.powering_on_l3_state);
-	in_desired_state &= kbase_pm_transition_core_type(kbdev, KBASE_PM_CORE_L2, desired_l2_state, 0, NULL, &kbdev->pm.powering_on_l2_state);
+	in_desired_state &= kbase_pm_transition_core_type(kbdev, KBASE_PM_CORE_L2, desired_l2_state, 0, &l2_available_bitmap, &kbdev->pm.powering_on_l2_state);
+
+	if( kbdev->l2_available_bitmap != l2_available_bitmap)
+	{
+		KBASE_TIMELINE_POWER_L2(kbdev,l2_available_bitmap);
+	}
+
+	kbdev->l2_available_bitmap = l2_available_bitmap;
 
 	if (in_desired_state) {
-		in_desired_state &= kbase_pm_transition_core_type(kbdev, KBASE_PM_CORE_TILER, kbdev->pm.desired_tiler_state, kbdev->tiler_inuse_bitmap, &tiler_available_bitmap, &kbdev->pm.powering_on_tiler_state);
+
+		in_desired_state &= kbase_pm_transition_core_type(kbdev, KBASE_PM_CORE_TILER, kbdev->pm.desired_tiler_state, 0, &tiler_available_bitmap, &kbdev->pm.powering_on_tiler_state);
 		in_desired_state &= kbase_pm_transition_core_type(kbdev, KBASE_PM_CORE_SHADER, kbdev->pm.desired_shader_state, kbdev->shader_inuse_bitmap, &shader_available_bitmap, &kbdev->pm.powering_on_shader_state);
 
-		if (kbdev->shader_available_bitmap != shader_available_bitmap)
-		{
+		if (kbdev->shader_available_bitmap != shader_available_bitmap) {
 			KBASE_TRACE_ADD(kbdev, PM_CORES_CHANGE_AVAILABLE, NULL, NULL, 0u, (u32) shader_available_bitmap);
 			KBASE_TIMELINE_POWER_SHADER(kbdev, shader_available_bitmap);
 		}
 
-		if (kbdev->tiler_available_bitmap != tiler_available_bitmap)
-		{
+		kbdev->shader_available_bitmap = shader_available_bitmap;
+
+		if (kbdev->tiler_available_bitmap != tiler_available_bitmap) {
+			KBASE_TRACE_ADD(kbdev, PM_CORES_CHANGE_AVAILABLE_TILER, NULL, NULL, 0u, (u32) tiler_available_bitmap);
 			KBASE_TIMELINE_POWER_TILER(kbdev, tiler_available_bitmap);
 		}
 
-		kbdev->shader_available_bitmap = shader_available_bitmap;
+		kbdev->tiler_available_bitmap = tiler_available_bitmap;
+
+	} else if ((l2_available_bitmap & kbdev->tiler_present_bitmap) != kbdev->tiler_present_bitmap) {
+		tiler_available_bitmap = 0;
+
+		if (kbdev->tiler_available_bitmap != tiler_available_bitmap) {
+			KBASE_TIMELINE_POWER_TILER(kbdev, tiler_available_bitmap);
+		}
+
 		kbdev->tiler_available_bitmap = tiler_available_bitmap;
 	}
 
-	atomic_set(&kbdev->pm.gpu_in_desired_state, in_desired_state);
+	/* State updated for slow-path waiters */
+	kbdev->pm.gpu_in_desired_state = in_desired_state;
+
+	shader_ready_bitmap = kbase_pm_get_ready_cores(kbdev, KBASE_PM_CORE_SHADER);
+	shader_transitioning_bitmap = kbase_pm_get_trans_cores(kbdev, KBASE_PM_CORE_SHADER);
+
+	/* Determine whether the cores are now available (even if the set of
+	 * available cores is empty). Note that they can be available even if we've
+	 * not finished transitioning to the desired state */
+	if ((kbdev->shader_available_bitmap & kbdev->pm.desired_shader_state) == kbdev->pm.desired_shader_state
+		&& (kbdev->tiler_available_bitmap & kbdev->pm.desired_tiler_state) == kbdev->pm.desired_tiler_state) {
+		cores_are_available = MALI_TRUE;
+
+		KBASE_TRACE_ADD(kbdev, PM_CORES_AVAILABLE, NULL, NULL, 0u, (u32)(kbdev->shader_available_bitmap & kbdev->pm.desired_shader_state));
+		KBASE_TRACE_ADD(kbdev, PM_CORES_AVAILABLE_TILER, NULL, NULL, 0u, (u32)(kbdev->tiler_available_bitmap & kbdev->pm.desired_tiler_state));
+
+		/* Log timelining information about handling events that power up
+		 * cores, to match up either with immediate submission either because
+		 * cores already available, or from PM IRQ */
+		if (!in_desired_state)
+			kbase_timeline_pm_send_event(kbdev, KBASE_TIMELINE_PM_EVENT_GPU_STATE_CHANGED);
+	}
 
 	if (in_desired_state) {
+		KBASE_DEBUG_ASSERT(cores_are_available);
+
 #ifdef CONFIG_MALI_GATOR_SUPPORT
 		kbase_trace_mali_pm_status(KBASE_PM_CORE_L3, kbase_pm_get_ready_cores(kbdev, KBASE_PM_CORE_L3));
 		kbase_trace_mali_pm_status(KBASE_PM_CORE_L2, kbase_pm_get_ready_cores(kbdev, KBASE_PM_CORE_L2));
 		kbase_trace_mali_pm_status(KBASE_PM_CORE_SHADER, kbase_pm_get_ready_cores(kbdev, KBASE_PM_CORE_SHADER));
 		kbase_trace_mali_pm_status(KBASE_PM_CORE_TILER, kbase_pm_get_ready_cores(kbdev, KBASE_PM_CORE_TILER));
 #endif				/* CONFIG_MALI_GATOR_SUPPORT */
-		kbase_pm_send_event(kbdev, KBASE_PM_EVENT_GPU_STATE_CHANGED);
+
+		KBASE_TRACE_ADD(kbdev, PM_DESIRED_REACHED, NULL, NULL, kbdev->pm.gpu_in_desired_state, (u32)kbdev->pm.desired_shader_state);
+		KBASE_TRACE_ADD(kbdev, PM_DESIRED_REACHED_TILER, NULL, NULL, 0u, (u32)kbdev->pm.desired_tiler_state);
+
+		/* Log timelining information for synchronous waiters */
+		kbase_timeline_pm_send_event(kbdev, KBASE_TIMELINE_PM_EVENT_GPU_STATE_CHANGED);
+		/* Wake slow-path waiters. Job scheduler does not use this. */
+		KBASE_TRACE_ADD(kbdev, PM_WAKE_WAITERS, NULL, NULL, 0u, 0);
+		wake_up(&kbdev->pm.gpu_in_desired_state_wait);
+	}
+	
+	spin_unlock(&kbdev->pm.gpu_powered_lock);
+
+	/* kbase_pm_ca_update_core_status can cause one-level recursion into
+	 * this function, so it must only be called once all changes to kbdev
+	 * have been committed, and after the gpu_powered_lock has been
+	 * dropped. */
+	if (kbdev->shader_ready_bitmap != shader_ready_bitmap ||
+	    kbdev->shader_transitioning_bitmap != shader_transitioning_bitmap) {
+		kbdev->shader_ready_bitmap = shader_ready_bitmap;
+		kbdev->shader_transitioning_bitmap = shader_transitioning_bitmap;
+
+		kbase_pm_ca_update_core_status(kbdev, shader_ready_bitmap, shader_transitioning_bitmap);
 	}
 
-	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
+	/* The core availability policy is not allowed to keep core group 0 off */
+	if (!((shader_ready_bitmap | shader_transitioning_bitmap) & kbdev->gpu_props.props.coherency_info.group[0].core_mask) &&
+	    !(kbase_pm_ca_get_core_mask(kbdev) & kbdev->gpu_props.props.coherency_info.group[0].core_mask))
+		BUG();
+
+	/* The core availability policy is allowed to keep core group 1 off, 
+	 * but all jobs specifically targeting CG1 must fail */
+	if (!((shader_ready_bitmap | shader_transitioning_bitmap) & kbdev->gpu_props.props.coherency_info.group[1].core_mask) &&
+	    !(kbase_pm_ca_get_core_mask(kbdev) & kbdev->gpu_props.props.coherency_info.group[1].core_mask))
+		kbdev->pm.cg1_disabled = MALI_TRUE;
+	else
+		kbdev->pm.cg1_disabled = MALI_FALSE;
+
+	return cores_are_available;
 }
+KBASE_EXPORT_TEST_API(kbase_pm_check_transitions_nolock)
 
-KBASE_EXPORT_TEST_API(kbase_pm_check_transitions)
+void kbase_pm_check_transitions_sync(struct kbase_device *kbdev)
+{
+	unsigned long flags;
+	mali_bool cores_are_available;
+	/* Force the transition to be checked and reported - the cores may be
+	 * 'available' (for job submission) but not fully powered up. */
+	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
+	cores_are_available = kbase_pm_check_transitions_nolock(kbdev);
+	/* Don't need 'cores_are_available', because we don't return anything */
+	CSTD_UNUSED(cores_are_available);
+	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
 
-void MOCKABLE(kbase_pm_enable_interrupts) (kbase_device *kbdev)
+	/* Wait for cores */
+	wait_event(kbdev->pm.gpu_in_desired_state_wait, kbdev->pm.gpu_in_desired_state);
+
+	/* Log timelining information that a change in state has completed */
+	kbase_timeline_pm_handle_event(kbdev, KBASE_TIMELINE_PM_EVENT_GPU_STATE_CHANGED);
+}
+KBASE_EXPORT_TEST_API(kbase_pm_check_transitions_sync)
+
+void kbase_pm_enable_interrupts(kbase_device *kbdev)
 {
 	unsigned long flags;
 
@@ -798,7 +587,6 @@ void MOCKABLE(kbase_pm_enable_interrupts) (kbase_device *kbdev)
 	 * Clear all interrupts,
 	 * and unmask them all.
 	 */
-
 	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_IRQ_CLEAR), GPU_IRQ_REG_ALL, NULL);
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_IRQ_MASK), GPU_IRQ_REG_ALL, NULL);
@@ -809,19 +597,11 @@ void MOCKABLE(kbase_pm_enable_interrupts) (kbase_device *kbdev)
 
 	kbase_reg_write(kbdev, MMU_REG(MMU_IRQ_CLEAR), 0xFFFFFFFF, NULL);
 	kbase_reg_write(kbdev, MMU_REG(MMU_IRQ_MASK), 0xFFFFFFFF, NULL);
-
-	/* Now allow IRQs, as we can receive them now */
-	spin_lock_irqsave(&kbdev->pm.gpu_powered_lock, flags);
-	kbdev->pm.gpu_irq_mask = GPU_IRQ_REG_ALL;
-	kbdev->pm.mmu_irq_mask = 0xFFFFFFFF;
-	kbdev->pm.job_irq_mask = 0xFFFFFFFF;
-	spin_unlock_irqrestore(&kbdev->pm.gpu_powered_lock, flags);
-
 }
 
 KBASE_EXPORT_TEST_API(kbase_pm_enable_interrupts)
 
-void MOCKABLE(kbase_pm_disable_interrupts) (kbase_device *kbdev)
+void kbase_pm_disable_interrupts(kbase_device *kbdev)
 {
 	unsigned long flags;
 
@@ -840,13 +620,6 @@ void MOCKABLE(kbase_pm_disable_interrupts) (kbase_device *kbdev)
 
 	kbase_reg_write(kbdev, MMU_REG(MMU_IRQ_MASK), 0, NULL);
 	kbase_reg_write(kbdev, MMU_REG(MMU_IRQ_CLEAR), 0xFFFFFFFF, NULL);
-
-	/* Now disallow IRQs, as we don't expect to receive them now */
-	spin_lock_irqsave(&kbdev->pm.gpu_powered_lock, flags);
-	kbdev->pm.gpu_irq_mask = 0;
-	kbdev->pm.mmu_irq_mask = 0;
-	kbdev->pm.job_irq_mask = 0;
-	spin_unlock_irqrestore(&kbdev->pm.gpu_powered_lock, flags);
 }
 
 KBASE_EXPORT_TEST_API(kbase_pm_disable_interrupts)
@@ -861,6 +634,7 @@ void kbase_pm_clock_on(kbase_device *kbdev)
 {
 	unsigned long flags;
 	KBASE_DEBUG_ASSERT(NULL != kbdev);
+	lockdep_assert_held(&kbdev->pm.lock);
 
 	if (kbdev->pm.gpu_powered) {
 		/* Already turned on */
@@ -868,11 +642,6 @@ void kbase_pm_clock_on(kbase_device *kbdev)
 	}
 
 	KBASE_TRACE_ADD(kbdev, PM_GPU_ON, NULL, NULL, 0u, 0u);
-
-	/* The GPU is going to transition, so unset the wait queues until the policy
-	 * informs us that the transition is complete */
-	kbdev->pm.power_state = PM_POWER_STATE_TRANS;
-	wake_up(&kbdev->pm.power_state_wait);
 
 	if (kbdev->pm.callback_power_on && kbdev->pm.callback_power_on(kbdev)) {
 		/* GPU state was lost, reset GPU to ensure it is in a consistent state */
@@ -893,6 +662,10 @@ void kbase_pm_clock_off(kbase_device *kbdev)
 {
 	unsigned long flags;
 	KBASE_DEBUG_ASSERT(NULL != kbdev);
+	lockdep_assert_held(&kbdev->pm.lock);
+
+	/* ASSERT that the cores should now be unavailable. No lock needed. */
+	KBASE_DEBUG_ASSERT(kbdev->shader_available_bitmap == 0u);
 
 	if (!kbdev->pm.gpu_powered) {
 		/* Already turned off */
@@ -923,6 +696,26 @@ struct kbasep_reset_timeout_data {
 	kbase_device *kbdev;
 };
 
+void kbase_pm_reset_done(kbase_device *kbdev)
+{
+	KBASE_DEBUG_ASSERT(kbdev != NULL);
+	kbdev->pm.reset_done = MALI_TRUE;
+	wake_up(&kbdev->pm.reset_done_wait);
+}
+
+/**
+ * Wait for the RESET_COMPLETED IRQ to occur, then reset the waiting state.
+ */
+STATIC void kbase_pm_wait_for_reset(kbase_device *kbdev)
+{
+	lockdep_assert_held(&kbdev->pm.lock);
+
+	wait_event(kbdev->pm.reset_done_wait, (kbdev->pm.reset_done));
+	kbdev->pm.reset_done = MALI_FALSE;
+}
+
+KBASE_EXPORT_TEST_API(kbase_pm_reset_done)
+
 static enum hrtimer_restart kbasep_reset_timeout(struct hrtimer *timer)
 {
 	struct kbasep_reset_timeout_data *rtdata = container_of(timer, struct kbasep_reset_timeout_data, timer);
@@ -942,16 +735,16 @@ static void kbase_pm_hw_issues(kbase_device *kbdev)
 
 	/* Needed due to MIDBASE-1494: LS_PAUSEBUFFER_DISABLE. See PRLAM-8443. */
 	if (kbase_hw_has_issue(kbdev, BASE_HW_ISSUE_8443))
-		value |= (1 << 16);
+		value |= SC_LS_PAUSEBUFFER_DISABLE;
 
 	/* Needed due to MIDBASE-2054: SDC_DISABLE_OQ_DISCARD. See PRLAM-10327. */
 	if (kbase_hw_has_issue(kbdev, BASE_HW_ISSUE_10327))
-		value |= (1 << 6);
+		value |= SC_SDC_DISABLE_OQ_DISCARD;
 
 	/* Enable alternative hardware counter selection if configured. */
-	if( kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_ALTERNATIVE_HWC) )
-		value |= (1 << 3);
-	
+	if (kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_ALTERNATIVE_HWC))
+		value |= SC_ALT_COUNTERS;
+
 	if (value != 0)
 		kbase_reg_write(kbdev, GPU_CONTROL_REG(SHADER_CONFIG), value, NULL);
 
@@ -977,14 +770,10 @@ mali_error kbase_pm_init_hw(kbase_device *kbdev, mali_bool enable_irqs )
 	struct kbasep_reset_timeout_data rtdata;
 
 	KBASE_DEBUG_ASSERT(NULL != kbdev);
+	lockdep_assert_held(&kbdev->pm.lock);
 
 	/* Ensure the clock is on before attempting to access the hardware */
 	if (!kbdev->pm.gpu_powered) {
-		/* The GPU is going to transition, so set the state to transitioning until the policy
-		 * informs us that the transition is complete */
-		kbdev->pm.power_state = PM_POWER_STATE_TRANS;
-		wake_up(&kbdev->pm.power_state_wait);
-
 		if (kbdev->pm.callback_power_on)
 			kbdev->pm.callback_power_on(kbdev);
 
@@ -996,15 +785,25 @@ mali_error kbase_pm_init_hw(kbase_device *kbdev, mali_bool enable_irqs )
 	/* Ensure interrupts are off to begin with, this also clears any outstanding interrupts */
 	kbase_pm_disable_interrupts(kbdev);
 
+	/* Prepare for the soft-reset */
+	kbdev->pm.reset_done = MALI_FALSE;
+
+	/* The cores should be made unavailable due to the reset */
+	spin_lock_irqsave(&kbdev->pm.power_change_lock, flags);
+	if (kbdev->shader_available_bitmap != 0u)
+			KBASE_TRACE_ADD(kbdev, PM_CORES_CHANGE_AVAILABLE, NULL, NULL, 0u, (u32)0u);
+	if (kbdev->tiler_available_bitmap != 0u)
+			KBASE_TRACE_ADD(kbdev, PM_CORES_CHANGE_AVAILABLE_TILER, NULL, NULL, 0u, (u32)0u);
+	kbdev->shader_available_bitmap = 0u;
+	kbdev->tiler_available_bitmap = 0u;
+	kbdev->l2_available_bitmap = 0u;
+	spin_unlock_irqrestore(&kbdev->pm.power_change_lock, flags);
+
 	/* Soft reset the GPU */
 	KBASE_TRACE_ADD(kbdev, CORE_GPU_SOFT_RESET, NULL, NULL, 0u, 0);
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_COMMAND), GPU_COMMAND_SOFT_RESET, NULL);
 
 	/* Unmask the reset complete interrupt only */
-	spin_lock_irqsave(&kbdev->pm.gpu_powered_lock, flags);
-	kbdev->pm.gpu_irq_mask = RESET_COMPLETED;
-	spin_unlock_irqrestore(&kbdev->pm.gpu_powered_lock, flags);
-
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_IRQ_MASK), RESET_COMPLETED, NULL);
 
 	/* Initialize a structure for tracking the status of the reset */
@@ -1017,9 +816,8 @@ mali_error kbase_pm_init_hw(kbase_device *kbdev, mali_bool enable_irqs )
 
 	hrtimer_start(&rtdata.timer, HR_TIMER_DELAY_MSEC(RESET_TIMEOUT), HRTIMER_MODE_REL);
 
-	/* Wait for the RESET_COMPLETED interrupt to be raised,
-	 * we use the PM_STATE_ON since it isn't in use yet */
-	wait_event(kbdev->pm.power_state_wait, kbdev->pm.power_state == PM_POWER_STATE_ON);
+	/* Wait for the RESET_COMPLETED interrupt to be raised */
+	kbase_pm_wait_for_reset(kbdev);
 
 	if (rtdata.timed_out == 0) {
 		/* GPU has been reset */
@@ -1047,9 +845,8 @@ mali_error kbase_pm_init_hw(kbase_device *kbdev, mali_bool enable_irqs )
 
 	hrtimer_start(&rtdata.timer, HR_TIMER_DELAY_MSEC(RESET_TIMEOUT), HRTIMER_MODE_REL);
 
-	/* Wait for the RESET_COMPLETED interrupt to be raised,
-	 * we use the PM_STATE_ON since it isn't in use yet */
-	wait_event(kbdev->pm.power_state_wait, kbdev->pm.power_state == PM_POWER_STATE_ON);
+	/* Wait for the RESET_COMPLETED interrupt to be raised */
+	kbase_pm_wait_for_reset(kbdev);
 
 	if (rtdata.timed_out == 0) {
 		/* GPU has been reset */

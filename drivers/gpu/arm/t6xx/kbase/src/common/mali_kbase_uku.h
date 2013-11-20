@@ -2,11 +2,14 @@
  *
  * (C) COPYRIGHT 2008-2013 ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
 
@@ -41,7 +44,7 @@
 
 #include "mali_kbase_gpuprops_types.h"
 
-#define BASE_UK_VERSION_MAJOR 3
+#define BASE_UK_VERSION_MAJOR 4
 #define BASE_UK_VERSION_MINOR 0
 
 typedef struct kbase_uk_tmem_alloc {
@@ -178,7 +181,7 @@ typedef struct kbase_uk_tmem_set_size {
 	u32 size;
 	/* OUT */
 	u32 actual_size;
-	u32 result_subcode;
+	base_backing_threshold_status result_subcode;
 	u32 padding;
 } kbase_uk_tmem_set_size;
 
@@ -189,9 +192,27 @@ typedef struct kbase_uk_tmem_resize {
 	s32 delta;
 	/* OUT */
 	u32 actual_size;
-	u32 result_subcode;
+	base_backing_threshold_status result_subcode;
 	u32 padding;
 } kbase_uk_tmem_resize;
+
+typedef struct kbase_uk_tmem_set_attributes {
+	uk_header header;
+	/* IN */
+	mali_addr64 gpu_addr;
+	u32 attributes;
+	u32 padding;
+	/* OUT */
+} kbase_uk_tmem_set_attributes;
+
+typedef struct kbase_uk_tmem_get_attributes {
+	uk_header header;
+	/* IN */
+	mali_addr64 gpu_addr;
+	/* OUT */
+	u32 attributes;
+	u32 padding;
+} kbase_uk_tmem_get_attributes;
 
 typedef struct kbase_uk_find_cpu_mapping {
 	uk_header header;
@@ -310,7 +331,9 @@ typedef enum kbase_uk_function_id {
 	KBASE_FUNC_FENCE_VALIDATE,
 	KBASE_FUNC_STREAM_CREATE,
 	KBASE_FUNC_TMEM_SETSIZE,
-	KBASE_FUNC_TMEM_GETSIZE
+	KBASE_FUNC_TMEM_GETSIZE,
+	KBASE_FUNC_TMEM_SET_ATTRIBUTES,
+	KBASE_FUNC_TMEM_GET_ATTRIBUTES
 } kbase_uk_function_id;
 
 #endif				/* _KBASE_UKU_H_ */

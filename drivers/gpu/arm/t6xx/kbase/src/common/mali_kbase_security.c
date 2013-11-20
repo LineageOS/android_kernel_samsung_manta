@@ -1,12 +1,15 @@
 /*
  *
- * (C) COPYRIGHT 2011-2012 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2011-2013 ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
 
@@ -18,6 +21,23 @@
  */
 
 #include <kbase/src/common/mali_kbase.h>
+
+static inline mali_bool kbasep_am_i_root(void)
+{
+#if KBASE_HWCNT_DUMP_BYPASS_ROOT
+	return MALI_TRUE;
+#else
+	/* Check if root */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
+	if (uid_eq(current_euid(), GLOBAL_ROOT_UID))
+		return MALI_TRUE;
+#else
+	if (current_euid() == 0)
+		return MALI_TRUE;
+#endif /*LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)*/
+	return MALI_FALSE;
+#endif /*KBASE_HWCNT_DUMP_BYPASS_ROOT*/
+}
 
 /**
  * kbase_security_has_capability - see mali_kbase_caps.h for description.
@@ -38,23 +58,9 @@ mali_bool kbase_security_has_capability(kbase_context *kctx, kbase_security_capa
 	/* Determine if access is allowed for the given cap */
 	switch (cap) {
 	case KBASE_SEC_MODIFY_PRIORITY:
-#if KBASE_HWCNT_DUMP_BYPASS_ROOT
-		access_allowed = TRUE;
-#else
-		/* Check if root */
-		if (current_euid() == 0)
-			access_allowed = TRUE;
-#endif
-		break;
 	case KBASE_SEC_INSTR_HW_COUNTERS_COLLECT:
 		/* Access is granted only if the caller is privileged */
-#if KBASE_HWCNT_DUMP_BYPASS_ROOT
-		access_allowed = TRUE;
-#else
-		/* Check if root */
-		if (current_euid() == 0)
-			access_allowed = TRUE;
-#endif
+		access_allowed = kbasep_am_i_root();
 		break;
 	}
 

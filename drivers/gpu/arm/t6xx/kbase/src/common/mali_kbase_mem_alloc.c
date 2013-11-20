@@ -2,11 +2,14 @@
  *
  * (C) COPYRIGHT 2010-2013 ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
 
@@ -82,7 +85,7 @@ void kbase_mem_allocator_term(kbase_mem_allocator *allocator)
 	KBASE_DEBUG_ASSERT(NULL != allocator);
 
 	unregister_shrinker(&allocator->free_list_reclaimer);
-
+	mutex_lock(&allocator->free_list_lock);
 	while (!list_empty(&allocator->free_list_head))
 	{
 		struct page * p;
@@ -90,6 +93,8 @@ void kbase_mem_allocator_term(kbase_mem_allocator *allocator)
 		list_del(&p->lru);
 		__free_page(p);
 	}
+	atomic_set(&allocator->free_list_size, 0);
+	mutex_unlock(&allocator->free_list_lock);
 	mutex_destroy(&allocator->free_list_lock);
 }
 KBASE_EXPORT_TEST_API(kbase_mem_allocator_term)

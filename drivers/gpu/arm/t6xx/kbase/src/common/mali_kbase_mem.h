@@ -2,11 +2,14 @@
  *
  * (C) COPYRIGHT 2010-2013 ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
 
@@ -74,7 +77,7 @@ typedef struct kbase_va_region {
 #define KBASE_REG_FREE       (1ul << 0)	/* Free region */
 #define KBASE_REG_CPU_WR     (1ul << 1)	/* CPU write access */
 #define KBASE_REG_GPU_WR     (1ul << 2)	/* GPU write access */
-#define KBASE_REG_GPU_NX     (1ul << 3)	/* No eXectue flag */
+#define KBASE_REG_GPU_NX     (1ul << 3)	/* No eXecute flag */
 #define KBASE_REG_CPU_CACHED (1ul << 4)	/* Is CPU cached? */
 #define KBASE_REG_GPU_CACHED (1ul << 5)	/* Is GPU cached? */
 
@@ -102,10 +105,11 @@ typedef struct kbase_va_region {
 
 #ifndef KBASE_REG_ZONE_TMEM	/* To become 0 on a 64bit platform */
 /*
- * On a 32bit platform, TMEM should be wired from 4GB to the VA limit
- * of the GPU, which is currently hardcoded at 48 bits. Unfortunately,
- * the Linux mmap() interface limits us to 2^32 pages (2^44 bytes, see
- * mmap64 man page for reference).
+ * On a 32bit platform, TMEM should be wired from (4GB + shader region)
+ * to the VA limit of the GPU. Unfortunately, the Linux mmap() interface 
+ * limits us to 2^32 pages (2^44 bytes, see mmap64 man page for reference).
+ * So we put the default limit to the maximum possible on Linux and shrink
+ * it down, if required by the GPU, during initialization.
  */
 #define KBASE_REG_ZONE_EXEC         KBASE_REG_ZONE(1)	/* Dedicated 16MB region for shader code */
 #define KBASE_REG_ZONE_EXEC_BASE    ((1ULL << 32) >> PAGE_SHIFT)
@@ -309,6 +313,7 @@ phys_addr_t kbase_mmu_alloc_pgd(kbase_context *kctx);
 void kbase_mmu_free_pgd(kbase_context *kctx);
 mali_error kbase_mmu_insert_pages(kbase_context *kctx, u64 vpfn, phys_addr_t *phys, u32 nr, u32 flags);
 mali_error kbase_mmu_teardown_pages(kbase_context *kctx, u64 vpfn, u32 nr);
+mali_error kbase_mmu_update_pages(kbase_context* kctx, u64 vpfn, phys_addr_t* phys, u32 nr, u32 flags);
 
 /**
  * @brief Register region and map it on the GPU.
@@ -429,6 +434,33 @@ mali_error kbase_tmem_get_size(kbase_context *kctx, mali_addr64 gpu_addr, u32 * 
  * @return A region pointer on success, NULL on failure
  */
 struct kbase_va_region *kbase_tmem_import(kbase_context *kctx, base_tmem_import_type type, int handle, u64 * const pages);
+
+/**
+ * Set attributes for imported tmem region
+ *
+ * This function sets (extends with) requested attributes for given region
+ * of imported external memory
+ *
+ * @param[in]  kctx  	    The kbase context which the tmem belongs to
+ * @param[in]  gpu_addr     The base address of the tmem region
+ * @param[in]  attributes   The attributes of tmem region to be set
+ *
+ * @return MALI_ERROR_NONE on success.  Any other value indicates failure.
+ */
+mali_error kbase_tmem_set_attributes(kbase_context *kctx, mali_addr64 gpu_adr, u32  attributes );
+
+/**
+ * Get attributes of imported tmem region
+ *
+ * This function retrieves the attributes of imported external memory
+ *
+ * @param[in]  kctx  	    The kbase context which the tmem belongs to
+ * @param[in]  gpu_addr     The base address of the tmem region
+ * @param[out] attributes   The actual attributes of tmem region
+ *
+ * @return MALI_ERROR_NONE on success.  Any other value indicates failure.
+ */
+mali_error kbase_tmem_get_attributes(kbase_context *kctx, mali_addr64 gpu_adr, u32 * const attributes );
 
 /* OS specific functions */
 struct kbase_va_region *kbase_lookup_cookie(kbase_context *kctx, mali_addr64 cookie);

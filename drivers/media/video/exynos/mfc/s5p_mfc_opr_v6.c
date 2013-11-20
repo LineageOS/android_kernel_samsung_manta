@@ -109,8 +109,7 @@ int s5p_mfc_alloc_codec_buffers(struct s5p_mfc_ctx *ctx)
 	switch (ctx->codec_mode) {
 	case S5P_FIMV_CODEC_H264_DEC:
 	case S5P_FIMV_CODEC_H264_MVC_DEC:
-		if (dev->fw.date < 0x120206)
-			dec->mv_count = dec->total_dpb_count;
+		dec->mv_count = dec->total_dpb_count;
 		if (dev->fw.ver == 0x61)
 			ctx->scratch_buf_size =
 				DEC_V61_H264_SCRATCH_SIZE(mb_width, mb_height);
@@ -461,6 +460,7 @@ int s5p_mfc_set_dec_frame_buffer(struct s5p_mfc_ctx *ctx)
 	struct s5p_mfc_buf *buf;
 	struct list_head *buf_queue;
 	unsigned char *dpb_vir;
+	unsigned int reg = 0;
 
 	buf_addr1 = ctx->port_a_phys;
 	buf_size1 = ctx->port_a_size;
@@ -482,6 +482,28 @@ int s5p_mfc_set_dec_frame_buffer(struct s5p_mfc_ctx *ctx)
 			ctx->codec_mode == S5P_FIMV_CODEC_H264_MVC_DEC)
 		WRITEL(ctx->mv_size, S5P_FIMV_D_MV_BUFFER_SIZE);
 
+	if ((ctx->codec_mode == S5P_FIMV_CODEC_MPEG4_DEC) &&
+			FW_HAS_INITBUF_LOOP_FILTER(dev)) {
+		if (dec->loop_filter_mpeg4 &&
+				(dec->total_dpb_count >=
+					 ctx->dpb_count + NUM_MPEG4_LF_BUF)) {
+			if (!dec->internal_dpb) {
+				dec->internal_dpb = NUM_MPEG4_LF_BUF;
+				ctx->dpb_count += dec->internal_dpb;
+			}
+			reg |= (1 << S5P_FIMV_D_OPT_LF_CTRL_SHIFT);
+		} else if (dec->loop_filter_mpeg4) {
+			dec->loop_filter_mpeg4 = 0;
+			mfc_info("failed to enable loop filter\n");
+		}
+	}
+	if ((ctx->dst_fmt->fourcc == V4L2_PIX_FMT_NV12MT_16X16) &&
+			FW_HAS_INITBUF_TILE_MODE(dev))
+		reg |= (0x1 << S5P_FIMV_D_OPT_TILE_MODE_SHIFT);
+	if (dec->is_dynamic_dpb)
+		reg |= (0x1 << S5P_FIMV_D_OPT_DYNAMIC_DPB_SET_SHIFT);
+	WRITEL(reg, S5P_FIMV_D_INIT_BUFFER_OPTIONS);
+
 	frame_size = ctx->luma_size;
 	frame_size_ch = ctx->chroma_size;
 	frame_size_mv = ctx->mv_size;
@@ -494,6 +516,9 @@ int s5p_mfc_set_dec_frame_buffer(struct s5p_mfc_ctx *ctx)
 		buf_queue = &dec->dpb_queue;
 	i = 0;
 	list_for_each_entry(buf, buf_queue, list) {
+		/* Do not setting DPB */
+		if (dec->is_dynamic_dpb)
+			break;
 		mfc_debug(2, "Luma %x\n", buf->planes.raw.luma);
 		WRITEL(buf->planes.raw.luma, S5P_FIMV_D_LUMA_DPB + i * 4);
 		mfc_debug(2, "\tChroma %x\n", buf->planes.raw.chroma);
@@ -997,6 +1022,12 @@ static int s5p_mfc_set_enc_params_h264(struct s5p_mfc_ctx *ctx)
 		WRITEL(reg, S5P_FIMV_E_FIXED_PICTURE_QP);
 	}
 
+	/* sps pps control */
+	reg = READL(S5P_FIMV_E_H264_OPTIONS);
+	reg &= ~(0x1 << 29);
+	reg |= (p_264->prepend_sps_pps_to_idr << 29);
+	WRITEL(reg, S5P_FIMV_E_H264_OPTIONS);
+
 	/* extended encoder ctrl */
 	reg = READL(S5P_FIMV_E_H264_OPTIONS);
 	reg &= ~(0x1 << 5);
@@ -1296,6 +1327,8 @@ int s5p_mfc_init_decode(struct s5p_mfc_ctx *ctx)
 		  READL(S5P_FIMV_D_CPB_BUFFER_ADDR),
 		  READL(S5P_FIMV_D_CPB_BUFFER_ADDR));
 
+	reg |= (dec->idr_decoding << S5P_FIMV_D_OPT_IDR_DECODING_SHFT);
+
 	/* FMO_ASO_CTRL - 0: Enable, 1: Disable */
 	reg |= (fmo_aso_ctrl << S5P_FIMV_D_OPT_FMO_ASO_CTRL_MASK);
 
@@ -1308,11 +1341,13 @@ int s5p_mfc_init_decode(struct s5p_mfc_ctx *ctx)
 		WRITEL(dec->display_delay, S5P_FIMV_D_DISPLAY_DELAY);
 	}
 	/* Setup loop filter, for decoding this is only valid for MPEG4 */
-	if (ctx->codec_mode == S5P_FIMV_CODEC_MPEG4_DEC) {
+	if ((ctx->codec_mode == S5P_FIMV_CODEC_MPEG4_DEC) &&
+			!FW_HAS_INITBUF_LOOP_FILTER(dev)) {
 		mfc_debug(2, "Set loop filter to: %d\n", dec->loop_filter_mpeg4);
 		reg |= (dec->loop_filter_mpeg4 << S5P_FIMV_D_OPT_LF_CTRL_SHIFT);
 	}
-	if (ctx->dst_fmt->fourcc == V4L2_PIX_FMT_NV12MT_16X16)
+	if ((ctx->dst_fmt->fourcc == V4L2_PIX_FMT_NV12MT_16X16) &&
+			!FW_HAS_INITBUF_TILE_MODE(dev))
 		reg |= (0x1 << S5P_FIMV_D_OPT_TILE_MODE_SHIFT);
 
 	WRITEL(reg, S5P_FIMV_D_DEC_OPTIONS);
@@ -1360,6 +1395,12 @@ int s5p_mfc_decode_one_frame(struct s5p_mfc_ctx *ctx, int last_frame)
 	mfc_debug(2, "Setting flags to %08lx (free:%d WTF:%d)\n",
 				dec->dpb_status, ctx->dst_queue_cnt,
 						dec->dpb_queue_cnt);
+	if (dec->is_dynamic_dpb) {
+		mfc_debug(2, "Dynamic:0x%08x, Available:0x%08lx\n",
+					dec->dynamic_set, dec->dpb_status);
+		WRITEL(dec->dynamic_set, S5P_FIMV_D_DYNAMIC_DPB_FLAG_LOWER);
+		WRITEL(0x0, S5P_FIMV_D_DYNAMIC_DPB_FLAG_UPPER);
+	}
 	WRITEL(dec->dpb_status, S5P_FIMV_D_AVAILABLE_DPB_FLAG_LOWER);
 	WRITEL(0x0, S5P_FIMV_D_AVAILABLE_DPB_FLAG_UPPER);
 	WRITEL(dec->slice_enable, S5P_FIMV_D_SLICE_IF_ENABLE);
@@ -1472,10 +1513,18 @@ static inline int s5p_mfc_get_new_ctx(struct s5p_mfc_dev *dev)
 static inline int s5p_mfc_run_dec_last_frames(struct s5p_mfc_ctx *ctx)
 {
 	struct s5p_mfc_dev *dev = ctx->dev;
-	struct s5p_mfc_buf *temp_vb;
+	struct s5p_mfc_buf *temp_vb, *dst_vb;
+	struct s5p_mfc_dec *dec = ctx->dec_priv;
+	int dst_index;
 	unsigned long flags;
 
 	spin_lock_irqsave(&dev->irqlock, flags);
+
+	if ((dec->is_dynamic_dpb) && (ctx->dst_queue_cnt == 0)) {
+		mfc_debug(2, "No dst buffer\n");
+		spin_unlock_irqrestore(&dev->irqlock, flags);
+		return -EAGAIN;
+	}
 
 	/* Frames are being decoded */
 	if (list_empty(&ctx->src_queue)) {
@@ -1490,6 +1539,23 @@ static inline int s5p_mfc_run_dec_last_frames(struct s5p_mfc_ctx *ctx)
 			s5p_mfc_mem_plane_addr(ctx, &temp_vb->vb, 0), 0, 0);
 	}
 
+	if (dec->is_dynamic_dpb) {
+		dst_vb = list_entry(ctx->dst_queue.next,
+						struct s5p_mfc_buf, list);
+		dst_index = dst_vb->vb.v4l2_buf.index;
+		dec->dynamic_set = 1 << dst_index;
+		dst_vb->used = 1;
+		set_bit(dst_index, &dec->dpb_status);
+		mfc_debug(2, "ADDING Flag after: %lx\n", dec->dpb_status);
+
+		WRITEL(dst_vb->planes.raw.luma,
+				S5P_FIMV_D_LUMA_DPB + (dst_index * 4));
+		WRITEL(dst_vb->planes.raw.chroma,
+				S5P_FIMV_D_CHROMA_DPB + (dst_index * 4));
+		WRITEL(ctx->luma_size, S5P_FIMV_D_LUMA_DPB_SIZE);
+		WRITEL(ctx->chroma_size, S5P_FIMV_D_CHROMA_DPB_SIZE);
+	}
+
 	spin_unlock_irqrestore(&dev->irqlock, flags);
 
 	dev->curr_ctx = ctx->num;
@@ -1502,7 +1568,9 @@ static inline int s5p_mfc_run_dec_last_frames(struct s5p_mfc_ctx *ctx)
 static inline int s5p_mfc_run_dec_frame(struct s5p_mfc_ctx *ctx)
 {
 	struct s5p_mfc_dev *dev = ctx->dev;
-	struct s5p_mfc_buf *temp_vb;
+	struct s5p_mfc_buf *temp_vb, *dst_vb;
+	struct s5p_mfc_dec *dec = ctx->dec_priv;
+	int dst_index;
 	unsigned long flags;
 	int last_frame = 0;
 	unsigned int index;
@@ -1515,10 +1583,12 @@ static inline int s5p_mfc_run_dec_frame(struct s5p_mfc_ctx *ctx)
 		spin_unlock_irqrestore(&dev->irqlock, flags);
 		return -EAGAIN;
 	}
-	if (ctx->dst_queue_cnt < ctx->dpb_count) {
+	if ((dec->is_dynamic_dpb && ctx->dst_queue_cnt == 0) ||
+		(!dec->is_dynamic_dpb && ctx->dst_queue_cnt < ctx->dpb_count)) {
 		spin_unlock_irqrestore(&dev->irqlock, flags);
 		return -EAGAIN;
 	}
+
 	/* Get the next source buffer */
 	temp_vb = list_entry(ctx->src_queue.next, struct s5p_mfc_buf, list);
 	temp_vb->used = 1;
@@ -1528,11 +1598,31 @@ static inline int s5p_mfc_run_dec_frame(struct s5p_mfc_ctx *ctx)
 	s5p_mfc_set_dec_stream_buffer(ctx,
 			s5p_mfc_mem_plane_addr(ctx, &temp_vb->vb, 0),
 			0, temp_vb->vb.v4l2_planes[0].bytesused);
-	spin_unlock_irqrestore(&dev->irqlock, flags);
 
 	index = temp_vb->vb.v4l2_buf.index;
 	if (call_cop(ctx, set_buf_ctrls_val, ctx, &ctx->src_ctrls[index]) < 0)
 		mfc_err("failed in set_buf_ctrls_val\n");
+
+	if (dec->is_dynamic_dpb) {
+		dst_vb = list_entry(ctx->dst_queue.next,
+						struct s5p_mfc_buf, list);
+		dst_index = dst_vb->vb.v4l2_buf.index;
+		dec->dynamic_set = 1 << dst_index;
+		dst_vb->used = 1;
+		set_bit(dst_index, &dec->dpb_status);
+		mfc_debug(2, "ADDING Flag after: %lx\n", dec->dpb_status);
+
+		mfc_debug(2, "Dst addr [%d] = 0x%x\n", dst_index,
+						dst_vb->planes.raw.luma);
+		WRITEL(dst_vb->planes.raw.luma,
+				S5P_FIMV_D_LUMA_DPB + (dst_index * 4));
+		WRITEL(dst_vb->planes.raw.chroma,
+				S5P_FIMV_D_CHROMA_DPB + (dst_index * 4));
+		WRITEL(ctx->luma_size, S5P_FIMV_D_LUMA_DPB_SIZE);
+		WRITEL(ctx->chroma_size, S5P_FIMV_D_CHROMA_DPB_SIZE);
+	}
+
+	spin_unlock_irqrestore(&dev->irqlock, flags);
 
 	dev->curr_ctx = ctx->num;
 	s5p_mfc_clean_ctx_int_flags(ctx);
@@ -1657,12 +1747,13 @@ static inline int s5p_mfc_run_init_enc(struct s5p_mfc_ctx *ctx)
 static inline int s5p_mfc_run_init_dec_buffers(struct s5p_mfc_ctx *ctx)
 {
 	struct s5p_mfc_dev *dev = ctx->dev;
+	struct s5p_mfc_dec *dec = ctx->dec_priv;
 	int ret;
 	/* Header was parsed now starting processing
 	 * First set the output frame buffers
 	 * s5p_mfc_alloc_dec_buffers(ctx); */
 
-	if (ctx->capture_state != QUEUE_BUFS_MMAPED) {
+	if (!dec->is_dynamic_dpb && (ctx->capture_state != QUEUE_BUFS_MMAPED)) {
 		mfc_err("It seems that not all destionation buffers were "
 			"mmaped.\nMFC requires that all destination are mmaped "
 			"before starting processing.\n");
@@ -1708,6 +1799,19 @@ static inline int s5p_mfc_run_init_enc_buffers(struct s5p_mfc_ctx *ctx)
 		ctx->state = MFCINST_ERROR;
 	}
 	return ret;
+}
+
+static inline int s5p_mfc_dec_dpb_flush(struct s5p_mfc_ctx *ctx)
+{
+	struct s5p_mfc_dev *dev = ctx->dev;
+
+	dev->curr_ctx = ctx->num;
+	s5p_mfc_clean_ctx_int_flags(ctx);
+
+	WRITEL(ctx->inst_no, S5P_FIMV_INSTANCE_ID);
+	s5p_mfc_cmd_host2risc(S5P_FIMV_H2R_CMD_FLUSH, NULL);
+
+	return 0;
 }
 
 static inline int s5p_mfc_ctx_ready(struct s5p_mfc_ctx *ctx)
@@ -1800,6 +1904,9 @@ void s5p_mfc_try_run(struct s5p_mfc_dev *dev)
 			ctx->capture_state = QUEUE_FREE;
 			mfc_debug(2, "Will re-init the codec`.\n");
 			s5p_mfc_run_init_dec(ctx);
+			break;
+		case MFCINST_DPB_FLUSHING:
+			ret = s5p_mfc_dec_dpb_flush(ctx);
 			break;
 		default:
 			ret = -EAGAIN;

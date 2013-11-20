@@ -29,10 +29,12 @@
 
 #include <mach/exynos5_bus.h>
 
-#define MFC_MAX_EXTRA_DPB       5
 #define MFC_MAX_BUFFERS		32
 #define MFC_MAX_REF_BUFS	2
 #define MFC_FRAME_PLANES	2
+#define MFC_MAX_PLANES		3
+#define MFC_MAX_DPBS		32
+#define MFC_INFO_INIT_FD	-1
 
 #define MFC_NUM_CONTEXTS	5
 /* Interrupt timeout */
@@ -96,6 +98,7 @@ enum s5p_mfc_inst_state {
 	MFCINST_RES_CHANGE_FLUSH,
 	MFCINST_RES_CHANGE_END,
 	MFCINST_RUNNING_NO_OUTPUT,
+	MFCINST_DPB_FLUSHING,
 };
 
 /**
@@ -106,6 +109,12 @@ enum s5p_mfc_queue_state {
 	QUEUE_BUFS_REQUESTED,
 	QUEUE_BUFS_QUERIED,
 	QUEUE_BUFS_MMAPED,
+};
+
+enum mfc_dec_wait_state {
+	WAIT_NONE = 0,
+	WAIT_DECODING,
+	WAIT_INITBUF_DONE,
 };
 
 /**
@@ -219,6 +228,9 @@ struct s5p_mfc_dev {
 	struct video_device	*vfd_dec;
 	struct video_device	*vfd_enc;
 	struct platform_device	*plat_dev;
+#ifdef CONFIG_ION_EXYNOS
+	struct ion_client	*mfc_ion_client;
+#endif
 
 	void __iomem		*regs_base;
 	int			irq;
@@ -327,6 +339,8 @@ struct s5p_mfc_h264_enc_params {
 	u32 fmo_sg_rate;
 	u32 aso_enable;
 	u32 aso_slice_order[8];
+
+	u32 prepend_sps_pps_to_idr;
 };
 
 /**
@@ -485,6 +499,21 @@ struct s5p_mfc_codec_ops {
 	(((c)->c_ops->op) ?					\
 		((c)->c_ops->op(args)) : 0)
 
+struct stored_dpb_info {
+	int fd[MFC_MAX_PLANES];
+};
+
+struct dec_dpb_ref_info {
+	int index;
+	struct stored_dpb_info dpb[MFC_MAX_DPBS];
+};
+
+struct mfc_user_shared_handle {
+	int fd;
+	struct ion_handle *ion_handle;
+	void *virt;
+};
+
 struct s5p_mfc_dec {
 	int total_dpb_count;
 
@@ -498,6 +527,7 @@ struct s5p_mfc_dec {
 	int is_packedpb;
 	int slice_enable;
 	int mv_count;
+	int idr_decoding;
 
 	int crc_enable;
 	int crc_luma0;
@@ -514,8 +544,21 @@ struct s5p_mfc_dec {
 	int sei_parse;
 	int eos_tag;
 
+	int internal_dpb;
+
 	/* For 6.x */
 	int remained;
+	int cr_left, cr_right, cr_top, cr_bot;
+
+	int is_dynamic_dpb;
+	unsigned int dynamic_set;
+	unsigned int dynamic_used;
+	struct list_head ref_queue;
+	unsigned int ref_queue_cnt;
+	struct dec_dpb_ref_info *ref_info;
+	int assigned_fd[MFC_MAX_DPBS];
+	struct mfc_user_shared_handle sh_handle;
+
 };
 
 struct s5p_mfc_enc {
@@ -627,6 +670,8 @@ struct s5p_mfc_ctx {
 
 	/* for PPMU monitoring */
 	struct exynos5_bus_int_handle *mfc_int_handle_poll;
+
+	enum mfc_dec_wait_state wait_state;
 };
 
 #define fh_to_mfc_ctx(x)	\
@@ -641,6 +686,14 @@ struct s5p_mfc_ctx {
 #define IS_TWOPORT(dev)		(dev->variant->port_num == 2 ? 1 : 0)
 #define IS_MFCV6(dev)		(dev->variant->version >= 0x60 ? 1 : 0)
 
+/* supported feature macros by F/W version */
+#define FW_HAS_BUS_RESET(dev)			((dev)->fw.date >= 0x120206)
+#define FW_HAS_VER_INFO(dev)			((dev)->fw.date >= 0x120328)
+#define FW_HAS_INITBUF_TILE_MODE(dev)		((dev)->fw.date >= 0x120629)
+#define FW_HAS_INITBUF_LOOP_FILTER(dev)		((dev)->fw.date >= 0x120831)
+#define FW_HAS_ENC_SPSPPS_CTRL(dev)		((IS_MFCV6(dev) &&	\
+						((dev)->fw.date >= 0x121005)))
+
 struct s5p_mfc_fmt {
 	char *name;
 	u32 fourcc;
@@ -648,6 +701,10 @@ struct s5p_mfc_fmt {
 	u32 type;
 	u32 num_planes;
 };
+
+#ifdef CONFIG_ION_EXYNOS
+extern struct ion_device *ion_exynos;
+#endif
 
 #if defined(CONFIG_EXYNOS_MFC_V5)
 #include "regs-mfc-v5.h"

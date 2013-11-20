@@ -37,9 +37,31 @@ struct ion_platform_heap exynos_ion_heaps[] = {
 	},
 };
 
+struct ion_platform_heap heaps[] = {
+	{	.type = ION_HEAP_TYPE_SYSTEM,
+		.name = "ion_noncontig_heap",
+		.id = EXYNOS_ION_HEAP_SYSTEM_ID,
+	},
+	{	.type = ION_HEAP_TYPE_EXYNOS,
+		.name = "exynos_noncontig_heap",
+		.id = EXYNOS_ION_HEAP_EXYNOS_ID,
+	},
+	{	.type = ION_HEAP_TYPE_EXYNOS_CONTIG,
+		.name = "exynos_contig_heap",
+		.id = EXYNOS_ION_HEAP_EXYNOS_CONTIG_ID,
+	},
+	{	.type = ION_HEAP_TYPE_CHUNK,
+		.name = "ion_chunk_heap",
+		.id = EXYNOS_ION_HEAP_CHUNK_ID,
+		.size = SZ_256M,
+		.align = SZ_1M,
+		.priv = (void *)SZ_1M,
+	},
+};
+
 struct ion_platform_data exynos_ion_pdata = {
-	.nr = 4,
-	.heaps = exynos_ion_heaps,
+	.nr = ARRAY_SIZE(heaps),
+	.heaps = &heaps,
 };
 
 struct platform_device exynos_device_ion = {

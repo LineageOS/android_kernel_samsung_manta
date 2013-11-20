@@ -171,7 +171,7 @@ int s5p_mfc_clock_on(void)
 	}
 
 	spin_lock_irqsave(&pm->clklock, flags);
-	if ((atomic_inc_return(&clk_ref) == 1) && (dev->fw.date >= 0x120206)) {
+	if ((atomic_inc_return(&clk_ref) == 1) && (FW_HAS_BUS_RESET(dev))) {
 		val = s5p_mfc_read_reg(S5P_FIMV_MFC_BUS_RESET_CTRL);
 		val &= ~(0x1);
 		s5p_mfc_write_reg(val, S5P_FIMV_MFC_BUS_RESET_CTRL);
@@ -191,7 +191,7 @@ void s5p_mfc_clock_off(void)
 	struct s5p_mfc_dev *dev = platform_get_drvdata(to_platform_device(pm->device));
 
 	spin_lock_irqsave(&pm->clklock, flags);
-	if ((atomic_dec_return(&clk_ref) == 0) && (dev->fw.date >= 0x120206)) {
+	if ((atomic_dec_return(&clk_ref) == 0) && (FW_HAS_BUS_RESET(dev))) {
 		s5p_mfc_write_reg(0x1, S5P_FIMV_MFC_BUS_RESET_CTRL);
 
 		timeout = jiffies + msecs_to_jiffies(MFC_BW_TIMEOUT);

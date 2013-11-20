@@ -1703,7 +1703,7 @@ static int smb347_probe(struct i2c_client *client,
 	smb->usb.num_supplicants = ARRAY_SIZE(battery);
 
 	smb->battery.name = "smb347-battery";
-	smb->battery.type = POWER_SUPPLY_TYPE_UNKNOWN;
+	smb->battery.type = POWER_SUPPLY_TYPE_BATTERY;
 	smb->battery.get_property = smb347_battery_get_property;
 	smb->battery.set_property = smb347_battery_set_property;
 	smb->battery.property_is_writeable = smb347_battery_property_is_writeable;
