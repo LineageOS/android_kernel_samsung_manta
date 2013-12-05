@@ -170,7 +170,7 @@ obj-$(CONFIG_FB_VIRTUAL)          += vfb.o
 #video output switch sysfs driver
 obj-$(CONFIG_VIDEO_OUTPUT_CONTROL) += output.o
 
-ifeq ($(CONFIG_MALI_T6XX),y)
-    EXTRA_CFLAGS += -Idrivers/gpu/arm/t6xx
+ifeq ($(CONFIG_MALI_MIDGARD),y)
+    EXTRA_CFLAGS += -Idrivers/gpu/arm/midgard
 endif
 
