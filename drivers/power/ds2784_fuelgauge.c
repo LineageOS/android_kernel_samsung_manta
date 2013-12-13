@@ -23,6 +23,7 @@
 #include <linux/gpio.h>
 #include <linux/spinlock.h>
 #include <linux/power_supply.h>
+#include <linux/types.h>
 #include <linux/debugfs.h>
 #include <linux/math64.h>
 
@@ -185,6 +186,37 @@ static int ds2784_get_accumulated_current(struct ds2784_info *di, int *acc)
 	return 0;
 }
 
+static int ds2784_get_accumulated_current_ext(struct ds2784_info *di,
+					      int64_t *acc)
+{
+	int n;
+	int ret;
+	int div_rsnsp;
+
+	if (!di->raw[DS2784_REG_RSNSP]) {
+		ret = ds2784_read(di, di->raw + DS2784_REG_RSNSP,
+				  DS2784_REG_RSNSP, 1);
+		if (ret < 0) {
+			dev_err(di->dev, "error %d reading RSNSP\n", ret);
+			return ret;
+		}
+	}
+	div_rsnsp = 100 / di->raw[DS2784_REG_RSNSP];
+
+	ret = ds2784_read(di, di->raw + DS2784_REG_ACCUMULATE_CURR_MSB,
+			  DS2784_REG_ACCUMULATE_CURR_MSB, 4);
+
+	if (ret < 0)
+		return ret;
+
+	n = (di->raw[DS2784_REG_ACCUMULATE_CURR_MSB] << 20) |
+		(di->raw[DS2784_REG_ACCUMULATE_CURR_LSB] << 12) |
+		(di->raw[DS2784_REG_ACCUMULATE_CURR_LSB1] << 4) |
+		di->raw[DS2784_REG_ACCUMULATE_CURR_LSB2];
+	*acc = div_s64((long long)n * 144, div_rsnsp);
+	return 0;
+}
+
 static int ds2784_get_property(struct power_supply *psy,
 	enum power_supply_property psp,
 	union power_supply_propval *val)
@@ -228,6 +260,10 @@ static int ds2784_get_property(struct power_supply *psy,
 		ret = ds2784_get_accumulated_current(di, &val->intval);
 		break;
 
+	case POWER_SUPPLY_PROP_CHARGE_COUNTER_EXT:
+		ret = ds2784_get_accumulated_current_ext(di, &val->int64val);
+		break;
+
 	default:
 		ret = -EINVAL;
 	}
@@ -244,6 +280,7 @@ static enum power_supply_property ds2784_props[] = {
 	POWER_SUPPLY_PROP_CURRENT_AVG,
 	POWER_SUPPLY_PROP_CAPACITY,
 	POWER_SUPPLY_PROP_CHARGE_COUNTER,
+	POWER_SUPPLY_PROP_CHARGE_COUNTER_EXT,
 };
 
 static int ds2784_debugfs_show(struct seq_file *s, void *unused)
