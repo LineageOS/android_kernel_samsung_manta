@@ -500,7 +500,7 @@ EXYNOS_PM_DEV(gscl3, gscl3, &exynos5_device_gsc3, "gscl");
 #ifdef CONFIG_EXYNOS4_DEV_FIMC_IS
 EXYNOS_PM_DEV(isp, isp, &exynos5_device_fimc_is, NULL);
 #endif
-#ifdef CONFIG_MALI_T6XX
+#ifdef CONFIG_MALI_MIDGARD
 EXYNOS_PM_DEV(g3d, g3d, &exynos5_device_g3d, "g3d");
 #endif
 
@@ -530,7 +530,7 @@ static struct exynos_pm_dev *exynos_pm_devs[] = {
 #ifdef CONFIG_EXYNOS4_DEV_FIMC_IS
 	&exynos5_pm_dev_isp,
 #endif
-#ifdef CONFIG_MALI_T6XX
+#ifdef CONFIG_MALI_MIDGARD
 	&exynos5_pm_dev_g3d,
 #endif
 };
@@ -626,7 +626,7 @@ static int __init exynos5_pm_init_power_domain(void)
 	exynos_pm_add_dev_to_genpd(&exynos5_device_fimc_is, &exynos5_pd_isp);
 	exynos_pm_add_subdomain_to_genpd(&exynos5_pd_gscl.pd, &exynos5_pd_isp.pd);
 #endif
-#ifdef CONFIG_MALI_T6XX
+#ifdef CONFIG_MALI_MIDGARD
 	exynos_pm_add_dev_to_genpd(&exynos5_device_g3d, &exynos5_pd_g3d);
 #endif
 
