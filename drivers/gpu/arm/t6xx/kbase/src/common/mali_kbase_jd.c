@@ -174,6 +174,7 @@ static mali_error kbase_jd_umm_map(kbase_context *kctx, struct kbase_va_region *
 	int i;
 	phys_addr_t *pa;
 	mali_error err;
+	size_t count = 0;
 
 	KBASE_DEBUG_ASSERT(NULL == reg->imported_metadata.umm.st);
 	st = dma_buf_map_attachment(reg->imported_metadata.umm.dma_attachment, DMA_BIDIRECTIONAL);
@@ -191,8 +192,9 @@ static mali_error kbase_jd_umm_map(kbase_context *kctx, struct kbase_va_region *
 		int j;
 		size_t pages = PFN_DOWN(sg_dma_len(s));
 
-		for (j = 0; j < pages; j++)
+		for (j = 0; (j < pages) && (count < reg->nr_pages); j++, count++)
 			*pa++ = sg_dma_address(s) + (j << PAGE_SHIFT);
+		WARN_ONCE(j < pages, "sg list returned by dma_buf_map_attachment is larger than dma_buf->size=%zu\n", reg->imported_metadata.umm.dma_buf->size);
 	}
 
 	err = kbase_mmu_insert_pages(kctx, reg->start_pfn, kbase_get_phy_pages(reg), reg->nr_alloc_pages, reg->flags | KBASE_REG_GPU_WR | KBASE_REG_GPU_RD);
@@ -1280,7 +1282,9 @@ static enum hrtimer_restart zap_timeout_callback(struct hrtimer *timer)
 void kbase_jd_zap_context(kbase_context *kctx)
 {
 	kbase_jd_atom *katom;
+#ifdef CONFIG_KDS
 	struct list_head *entry;
+#endif
 	kbase_device *kbdev;
 	zap_reset_data reset_data;
 	unsigned long flags;
@@ -1299,9 +1303,11 @@ void kbase_jd_zap_context(kbase_context *kctx)
 	 * queued outside the job scheduler.
 	 */
 
-	list_for_each(entry, &kctx->waiting_soft_jobs) {
-		katom = list_entry(entry, kbase_jd_atom, dep_item[0]);
-
+	while (!list_empty(&kctx->waiting_soft_jobs)) {
+		katom = list_first_entry(&kctx->waiting_soft_jobs,
+					kbase_jd_atom,
+					dep_item[0]);
+		list_del(&katom->dep_item[0]);
 		kbase_cancel_soft_job(katom);
 	}
 
