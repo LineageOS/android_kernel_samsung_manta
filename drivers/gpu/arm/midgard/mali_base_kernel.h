@@ -289,6 +289,33 @@ typedef struct base_jd_udata {
 } base_jd_udata;
 
 /**
+ * @brief Memory aliasing info
+ *
+ * Describes a memory handle to be aliased.
+ * A subset of the handle can be chosen for aliasing, given an offset and a
+ * length.
+ * A special handle BASE_MEM_WRITE_ALLOC_PAGES_HANDLE is used to represent a
+ * region where a special page is mapped with a write-alloc cache setup,
+ * typically used when the write result of the GPU isn't needed, but the GPU
+ * must write anyway.
+ *
+ * Offset and length are specified in pages.
+ * Offset must be within the size of the handle.
+ * Offset+length must not overrun the size of the handle.
+ *
+ * @handle Handle to alias, can be BASE_MEM_WRITE_ALLOC_PAGES_HANDLE
+ * @offset Offset within the handle to start aliasing from, in pages.
+ *         Not used with BASE_MEM_WRITE_ALLOC_PAGES_HANDLE.
+ * @length Length to alias, in pages. For BASE_MEM_WRITE_ALLOC_PAGES_HANDLE
+ *         specifies the number of times the special page is needed.
+ */
+struct base_mem_aliasing_info {
+	base_mem_handle handle;
+	u64 offset;
+	u64 length;
+};
+
+/**
  * @brief Job chain hardware requirements.
  *
  * A job chain must specify what GPU features it needs to allow the
@@ -320,6 +347,10 @@ typedef u16 base_jd_core_req;
 #define BASE_JD_REQ_V   (1U << 4)   /**< Requires value writeback */
 
 /* SW-only requirements - the HW does not expose these as part of the job slot capabilities */
+
+/* Requires fragment job with AFBC encoding */
+#define BASE_JD_REQ_FS_AFBC  (1U << 13)
+
 /**
  * SW Only requirement: the job chain requires a coherent core group. We don't
  * mind which coherent core group is used.
@@ -388,8 +419,7 @@ typedef u16 base_jd_core_req;
 * These requirement bits are currently unused in base_jd_core_req (currently a u16)
 */
 
-#define BASEP_JD_REQ_RESERVED_BIT5  (1U << 5)
-#define BASEP_JD_REQ_RESERVED_BIT13 (1U << 13)
+#define BASEP_JD_REQ_RESERVED_BIT5 (1U << 5)
 #define BASEP_JD_REQ_RESERVED_BIT14 (1U << 14)
 #define BASEP_JD_REQ_RESERVED_BIT15 (1U << 15)
 
@@ -397,8 +427,9 @@ typedef u16 base_jd_core_req;
 * Mask of all the currently unused requirement bits in base_jd_core_req.
 */
 
-#define BASEP_JD_REQ_RESERVED (BASEP_JD_REQ_RESERVED_BIT5 | BASEP_JD_REQ_RESERVED_BIT13 |\
-				BASEP_JD_REQ_RESERVED_BIT14 | BASEP_JD_REQ_RESERVED_BIT15)
+#define BASEP_JD_REQ_RESERVED (BASEP_JD_REQ_RESERVED_BIT5 | \
+				BASEP_JD_REQ_RESERVED_BIT14 | \
+				BASEP_JD_REQ_RESERVED_BIT15)
 
 /**
  * Mask of all bits in base_jd_core_req that control the type of the atom.
@@ -857,7 +888,7 @@ typedef struct base_jd_event_v2 {
 } base_jd_event_v2;
 
 /**
- * Padding required to ensure that the @ref basep_dump_cpu_gpu_counters structure fills
+ * Padding required to ensure that the @ref base_dump_cpu_gpu_counters structure fills
  * a full cache line.
  */
 

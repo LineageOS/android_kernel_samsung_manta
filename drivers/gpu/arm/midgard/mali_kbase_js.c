@@ -506,9 +506,12 @@ mali_error kbasep_js_devdata_init(kbase_device * const kbdev)
 	/* Config attributes */
 	js_devdata->scheduling_tick_ns = (u32) kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_JS_SCHEDULING_TICK_NS);
 	js_devdata->soft_stop_ticks = (u32) kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_JS_SOFT_STOP_TICKS);
+	js_devdata->soft_stop_ticks_cl = (u32) kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_JS_SOFT_STOP_TICKS_CL);
 	js_devdata->hard_stop_ticks_ss = (u32) kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_SS);
+	js_devdata->hard_stop_ticks_cl = (u32) kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_CL);
 	js_devdata->hard_stop_ticks_nss = (u32) kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_NSS);
 	js_devdata->gpu_reset_ticks_ss = (u32) kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_JS_RESET_TICKS_SS);
+	js_devdata->gpu_reset_ticks_cl = (u32) kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_JS_RESET_TICKS_CL);
 	js_devdata->gpu_reset_ticks_nss = (u32) kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_JS_RESET_TICKS_NSS);
 	js_devdata->ctx_timeslice_ns = (u32) kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_JS_CTX_TIMESLICE_NS);
 	js_devdata->cfs_ctx_runtime_init_slices = (u32) kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_JS_CFS_CTX_RUNTIME_INIT_SLICES);
@@ -517,9 +520,12 @@ mali_error kbasep_js_devdata_init(kbase_device * const kbdev)
 	KBASE_DEBUG_PRINT_INFO(KBASE_JM, "JS Config Attribs: ");
 	KBASE_DEBUG_PRINT_INFO(KBASE_JM, "\tjs_devdata->scheduling_tick_ns:%u", js_devdata->scheduling_tick_ns);
 	KBASE_DEBUG_PRINT_INFO(KBASE_JM, "\tjs_devdata->soft_stop_ticks:%u", js_devdata->soft_stop_ticks);
+	KBASE_DEBUG_PRINT_INFO(KBASE_JM, "\tjs_devdata->soft_stop_ticks_cl:%u", js_devdata->soft_stop_ticks_cl);
 	KBASE_DEBUG_PRINT_INFO(KBASE_JM, "\tjs_devdata->hard_stop_ticks_ss:%u", js_devdata->hard_stop_ticks_ss);
+	KBASE_DEBUG_PRINT_INFO(KBASE_JM, "\tjs_devdata->hard_stop_ticks_cl:%u", js_devdata->hard_stop_ticks_cl);
 	KBASE_DEBUG_PRINT_INFO(KBASE_JM, "\tjs_devdata->hard_stop_ticks_nss:%u", js_devdata->hard_stop_ticks_nss);
 	KBASE_DEBUG_PRINT_INFO(KBASE_JM, "\tjs_devdata->gpu_reset_ticks_ss:%u", js_devdata->gpu_reset_ticks_ss);
+	KBASE_DEBUG_PRINT_INFO(KBASE_JM, "\tjs_devdata->gpu_reset_ticks_cl:%u", js_devdata->gpu_reset_ticks_cl);
 	KBASE_DEBUG_PRINT_INFO(KBASE_JM, "\tjs_devdata->gpu_reset_ticks_nss:%u", js_devdata->gpu_reset_ticks_nss);
 	KBASE_DEBUG_PRINT_INFO(KBASE_JM, "\tjs_devdata->ctx_timeslice_ns:%u", js_devdata->ctx_timeslice_ns);
 	KBASE_DEBUG_PRINT_INFO(KBASE_JM, "\tjs_devdata->cfs_ctx_runtime_init_slices:%u", js_devdata->cfs_ctx_runtime_init_slices);
@@ -1824,14 +1830,23 @@ void kbasep_js_try_schedule_head_ctx(kbase_device *kbdev)
 		if (kbdev->js_soft_stop_ticks != 0)
 			js_devdata->soft_stop_ticks = kbdev->js_soft_stop_ticks;
 
+		if (kbdev->js_soft_stop_ticks_cl != 0)
+			js_devdata->soft_stop_ticks_cl = kbdev->js_soft_stop_ticks_cl;
+
 		if (kbdev->js_hard_stop_ticks_ss != 0)
 			js_devdata->hard_stop_ticks_ss = kbdev->js_hard_stop_ticks_ss;
+
+		if (kbdev->js_hard_stop_ticks_cl != 0)
+			js_devdata->hard_stop_ticks_cl = kbdev->js_hard_stop_ticks_cl;
 
 		if (kbdev->js_hard_stop_ticks_nss != 0)
 			js_devdata->hard_stop_ticks_nss = kbdev->js_hard_stop_ticks_nss;
 
 		if (kbdev->js_reset_ticks_ss != 0)
 			js_devdata->gpu_reset_ticks_ss = kbdev->js_reset_ticks_ss;
+
+		if (kbdev->js_reset_ticks_cl != 0)
+			js_devdata->gpu_reset_ticks_cl = kbdev->js_reset_ticks_cl;
 
 		if (kbdev->js_reset_ticks_nss != 0)
 			js_devdata->gpu_reset_ticks_nss = kbdev->js_reset_ticks_nss;

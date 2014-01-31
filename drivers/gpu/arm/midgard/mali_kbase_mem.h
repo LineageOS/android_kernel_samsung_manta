@@ -39,6 +39,9 @@
 #include <mali_kbase_hw.h>
 #include "mali_kbase_pm.h"
 #include "mali_kbase_defs.h"
+#ifdef CONFIG_MALI_GATOR_SUPPORT
+#include "mali_kbase_gator.h"
+#endif  /*CONFIG_MALI_GATOR_SUPPORT*/
 
 /* Part of the workaround for uTLB invalid pages is to ensure we grow/shrink tmem by 4 pages at a time */
 #define KBASEP_TMEM_GROWABLE_BLOCKSIZE_PAGES_LOG2_HW_ISSUE_8316 (2)	/* round to 4 pages */
@@ -72,8 +75,17 @@ enum kbase_memory_type {
 	KBASE_MEM_TYPE_NATIVE,
 	KBASE_MEM_TYPE_IMPORTED_UMP,
 	KBASE_MEM_TYPE_IMPORTED_UMM,
+	KBASE_MEM_TYPE_ALIAS,
 	KBASE_MEM_TYPE_TB,
 	KBASE_MEM_TYPE_RAW
+};
+
+/* internal structure, mirroring base_mem_aliasing_info,
+ * but with alloc instead of a gpu va (handle) */
+struct kbase_aliased {
+	struct kbase_mem_phy_alloc *alloc; /* NULL for special, non-NULL for native */
+	u64 offset; /* in pages */
+	u64 length; /* in pages */
 };
 
 /* physical pages tracking object.
@@ -87,6 +99,7 @@ enum kbase_memory_type {
 struct kbase_mem_phy_alloc
 {
 	struct kref           kref; /* number of users of this alloc */
+	atomic_t              gpu_mappings;
 	size_t                nents; /* 0..N */
 	phys_addr_t *         pages; /* N elements, only 0..nents are valid */
 
@@ -111,10 +124,34 @@ struct kbase_mem_phy_alloc
 			struct sg_table *sgt;
 		} umm;
 #endif /* defined(CONFIG_DMA_SHARED_BUFFER) */
+		struct {
+			mali_size64 stride;
+			size_t nents;
+			struct kbase_aliased *aliased;
+		} alias;
 		/* Used by type = (KBASE_MEM_TYPE_NATIVE, KBASE_MEM_TYPE_TB) */
 		struct kbase_context *kctx;
 	} imported;
 };
+
+static inline void kbase_mem_phy_alloc_gpu_mapped(struct kbase_mem_phy_alloc *alloc)
+{
+	KBASE_DEBUG_ASSERT(alloc);
+	/* we only track mappings of NATIVE buffers */
+	if (alloc->type == KBASE_MEM_TYPE_NATIVE)
+		atomic_inc(&alloc->gpu_mappings);
+}
+
+static inline void kbase_mem_phy_alloc_gpu_unmapped(struct kbase_mem_phy_alloc *alloc)
+{
+	KBASE_DEBUG_ASSERT(alloc);
+	/* we only track mappings of NATIVE buffers */
+	if (alloc->type == KBASE_MEM_TYPE_NATIVE)
+		if (0 > atomic_dec_return(&alloc->gpu_mappings)) {
+			printk(KERN_ERR "Mismatched %s:\n", __func__);
+			dump_stack();
+		}
+}
 
 void kbase_mem_kref_free(struct kref * kref);
 
@@ -146,32 +183,49 @@ typedef struct kbase_va_region {
 	u64 start_pfn;		/* The PFN in GPU space */
 	size_t nr_pages;
 
-#define KBASE_REG_FREE       (1ul << 0)	/* Free region */
-#define KBASE_REG_CPU_WR     (1ul << 1)	/* CPU write access */
-#define KBASE_REG_GPU_WR     (1ul << 2)	/* GPU write access */
-#define KBASE_REG_GPU_NX     (1ul << 3)	/* No eXecute flag */
-#define KBASE_REG_CPU_CACHED (1ul << 4)	/* Is CPU cached? */
-#define KBASE_REG_GPU_CACHED (1ul << 5)	/* Is GPU cached? */
+/* Free region */
+#define KBASE_REG_FREE              (1ul << 0)
+/* CPU write access */
+#define KBASE_REG_CPU_WR            (1ul << 1)
+/* GPU write access */
+#define KBASE_REG_GPU_WR            (1ul << 2)
+/* No eXecute flag */
+#define KBASE_REG_GPU_NX            (1ul << 3)
+/* Is CPU cached? */
+#define KBASE_REG_CPU_CACHED        (1ul << 4)
+/* Is GPU cached? */
+#define KBASE_REG_GPU_CACHED        (1ul << 5)
 
-#define KBASE_REG_GROWABLE   (1ul << 6)
-#define KBASE_REG_PF_GROW    (1ul << 7)	/* Can grow on pf? */
+#define KBASE_REG_GROWABLE          (1ul << 6)
+/* Can grow on pf? */
+#define KBASE_REG_PF_GROW           (1ul << 7)
 
-#define KBASE_REG_CUSTOM_VA  (1ul << 8) /* VA managed by us */
+/* VA managed by us */
+#define KBASE_REG_CUSTOM_VA         (1ul << 8)
 
-#define KBASE_REG_SHARE_IN   (1ul << 9)	/* inner shareable coherency */
-#define KBASE_REG_SHARE_BOTH (1ul << 10)	/* inner & outer shareable coherency */
+/* inner shareable coherency */
+#define KBASE_REG_SHARE_IN          (1ul << 9)
+/* inner & outer shareable coherency */
+#define KBASE_REG_SHARE_BOTH        (1ul << 10)
 
-#define KBASE_REG_ZONE_MASK  (3ul << 11)	/* Space for 4 different zones */
-#define KBASE_REG_ZONE(x)    (((x) & 3) << 11)
+/* Space for 4 different zones */
+#define KBASE_REG_ZONE_MASK         (3ul << 11)
+#define KBASE_REG_ZONE(x)           (((x) & 3) << 11)
 
-#define KBASE_REG_GPU_RD     (1ul<<13)	/* GPU write access */
-#define KBASE_REG_CPU_RD     (1ul<<14)	/* CPU read access */
+/* GPU read access */
+#define KBASE_REG_GPU_RD            (1ul<<13)
+/* CPU read access */
+#define KBASE_REG_CPU_RD            (1ul<<14)
 
-#define KBASE_REG_ALIGNED    (1ul<<15) /* Aligned for GPU EX in SAME_VA */
+/* Aligned for GPU EX in SAME_VA */
+#define KBASE_REG_ALIGNED           (1ul<<15)
 
-#define KBASE_REG_FLAGS_NR_BITS    16	/* Number of bits used by kbase_va_region flags */
+/* Index of chosen MEMATTR for this region (0..7) */
+#define KBASE_REG_MEMATTR_MASK      (7ul << 16)
+#define KBASE_REG_MEMATTR_INDEX(x)  (((x) & 7) << 16)
+#define KBASE_REG_MEMATTR_VALUE(x)  (((x) & KBASE_REG_MEMATTR_MASK) >> 16)
 
-#define KBASE_REG_ZONE_SAME_VA  KBASE_REG_ZONE(0)
+#define KBASE_REG_ZONE_SAME_VA      KBASE_REG_ZONE(0)
 
 /* only used with 32-bit clients */
 /*
@@ -234,6 +288,7 @@ static INLINE struct kbase_mem_phy_alloc * kbase_alloc_create(size_t nr_pages, e
 		return ERR_PTR(-ENOMEM);
 
 	kref_init(&alloc->kref);
+	atomic_set(&alloc->gpu_mappings, 0);
 	alloc->nents = 0;
 	alloc->pages = (void*)(alloc + 1);
 	INIT_LIST_HEAD(&alloc->mappings);
@@ -358,7 +413,13 @@ void kbase_mmu_term(kbase_context *kctx);
 
 phys_addr_t kbase_mmu_alloc_pgd(kbase_context *kctx);
 void kbase_mmu_free_pgd(kbase_context *kctx);
-mali_error kbase_mmu_insert_pages(kbase_context *kctx, u64 vpfn, phys_addr_t *phys, size_t nr, unsigned long flags);
+mali_error kbase_mmu_insert_pages(kbase_context *kctx, u64 vpfn,
+				  phys_addr_t *phys, size_t nr,
+				  unsigned long flags);
+mali_error kbase_mmu_insert_single_page(kbase_context *kctx, u64 vpfn,
+					phys_addr_t phys, size_t nr,
+					unsigned long flags);
+
 mali_error kbase_mmu_teardown_pages(kbase_context *kctx, u64 vpfn, size_t nr);
 mali_error kbase_mmu_update_pages(kbase_context* kctx, u64 vpfn, phys_addr_t* phys, size_t nr, unsigned long flags);
 
@@ -420,7 +481,7 @@ void kbase_post_job_sync(kbase_context *kctx, base_syncset *syncsets, size_t nr)
  * of imported external memory
  *
  * @param[in]  kctx  	    The kbase context which the tmem belongs to
- * @param[in]  gpu_addr     The base address of the tmem region
+ * @param[in]  gpu_adr     The base address of the tmem region
  * @param[in]  attributes   The attributes of tmem region to be set
  *
  * @return MALI_ERROR_NONE on success.  Any other value indicates failure.
@@ -433,7 +494,7 @@ mali_error kbase_tmem_set_attributes(kbase_context *kctx, mali_addr64 gpu_adr, u
  * This function retrieves the attributes of imported external memory
  *
  * @param[in]  kctx  	    The kbase context which the tmem belongs to
- * @param[in]  gpu_addr     The base address of the tmem region
+ * @param[in]  gpu_adr     The base address of the tmem region
  * @param[out] attributes   The actual attributes of tmem region
  *
  * @return MALI_ERROR_NONE on success.  Any other value indicates failure.
@@ -452,6 +513,7 @@ void kbase_os_mem_map_unlock(kbase_context *kctx);
  * OS specific call to updates the current memory allocation counters for the current process with
  * the supplied delta.
  *
+ * @param[in] kctx  The kbase context 
  * @param[in] pages The desired delta to apply to the memory usage counters.
  */
 
@@ -516,7 +578,7 @@ void kbase_as_poking_timer_release_atom(kbase_device *kbdev, kbase_context *kctx
 * Allocates \a nr_pages_requested and updates the alloc object.
 *
 * @param[in] alloc allocation object to add pages to
-* @param[in] nr_pages number of physical pages to allocate
+* @param[in] nr_pages_requested number of physical pages to allocate
 *
 * @return 0 if all pages have been successfully allocated. Error code otherwise
 */
@@ -528,7 +590,7 @@ int kbase_alloc_phy_pages_helper(struct kbase_mem_phy_alloc * alloc, size_t nr_p
 * Frees \a nr_pages and updates the alloc object.
 *
 * @param[in] alloc allocation object to free pages from
-* @param[in] nr_pages number of physical pages to free
+* @param[in] nr_pages_to_free number of physical pages to free
 */
 int kbase_free_phy_pages_helper(struct kbase_mem_phy_alloc * alloc, size_t nr_pages_to_free);
 

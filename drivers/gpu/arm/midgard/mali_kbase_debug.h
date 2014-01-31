@@ -136,7 +136,7 @@ typedef struct kbasep_debug_assert_cb {
 #endif				/* KBASE_DEBUG_DISABLE_ASSERTS */
 
 /**
- * @def KBASEP_DEBUG_WARN_OUT(module, trace, ...)
+ * @def KBASE_DEBUG_PRINT_WARN(module, trace, ...)
  * @brief (Private) system printing function associated to the @see KBASE_DEBUG_PRINT_WARN event.
  * @param module module ID
  * @param trace location in the code from where the message is printed

@@ -64,15 +64,6 @@ enum {
 	KBASE_CONFIG_ATTR_INVALID,
 
 	/**
-	 * UMP device mapping.
-	 * Which UMP device this GPU should be mapped to.
-	 *
-	 * Attached value: UMP_DEVICE_<device>_SHIFT
-	 * Default value: UMP_DEVICE_W_SHIFT
-	 */
-	KBASE_CONFIG_ATTR_UMP_DEVICE,
-
-	/**
 	 * Maximum frequency GPU will be clocked at. Given in kHz.
 	 * This must be specified as there is no default value.
 	 *
@@ -141,7 +132,8 @@ enum {
 	KBASE_CONFIG_ATTR_JS_SCHEDULING_TICK_NS,
 
 	/**
-	 * Job Scheduler minimum number of scheduling ticks before jobs are soft-stopped.
+	 * Job Scheduler minimum number of scheduling ticks before non-CL jobs
+	 * are soft-stopped.
 	 *
 	 * This defines the amount of time a job is allowed to stay on the GPU,
 	 * before it is soft-stopped to allow other jobs to run.
@@ -160,8 +152,8 @@ enum {
 	 * which is somewhere between instant and one tick later.
 	 *
 	 * @note this value is allowed to be greater than
-	 * @ref KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_SS or
-	 * @ref KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_NSS. This effectively disables
+	 * @ref KBASE_CONFIG_ATTR_JS_RESET_TICKS_SS or
+	 * @ref KBASE_CONFIG_ATTR_JS_RESET_TICKS_NSS. This effectively disables
 	 * soft-stop, and just uses hard-stop instead. In this case, this value
 	 * should be much greater than any of the hard stop values (to avoid
 	 * soft-stop-after-hard-stop)
@@ -171,7 +163,39 @@ enum {
 	KBASE_CONFIG_ATTR_JS_SOFT_STOP_TICKS,
 
 	/**
-	 * Job Scheduler minimum number of scheduling ticks before jobs are hard-stopped.
+	 * Job Scheduler minimum number of scheduling ticks before CL jobs
+	 * are soft-stopped.
+	 *
+	 * This defines the amount of time a job is allowed to stay on the GPU,
+	 * before it is soft-stopped to allow other jobs to run.
+	 *
+	 * That is, this defines the 'timeslice' of the job. It is separate
+	 * from the timeslice of the context that contains the job (see
+	 * @ref KBASE_CONFIG_ATTR_JS_CTX_TIMESLICE_NS).
+	 *
+	 * This value is supported by the following scheduling policies:
+	 * - The Completely Fair Share (CFS) policy
+	 *
+	 * Attached value: unsigned 32-bit
+	 *                         kbasep_js_device_data::soft_stop_ticks_cl<br>
+	 * Default value: @ref DEFAULT_JS_SOFT_STOP_TICKS_CL
+	 *
+	 * @note a value of zero means "the quickest time to soft-stop a job",
+	 * which is somewhere between instant and one tick later.
+	 *
+	 * @note this value is allowed to be greater than
+	 * @ref KBASE_CONFIG_ATTR_JS_RESET_TICKS_CL. This effectively
+	 * disables soft-stop, and just uses hard-stop instead. In this case,
+	 * this value should be much greater than any of the hard stop values
+	 * (to avoid soft-stop-after-hard-stop)
+	 *
+	 * @see KBASE_CONFIG_ATTR_JS_SCHEDULING_TICK_NS
+	 */
+	KBASE_CONFIG_ATTR_JS_SOFT_STOP_TICKS_CL,
+
+	/**
+	 * Job Scheduler minimum number of scheduling ticks before non-CL jobs
+	 * are hard-stopped.
 	 *
 	 * This defines the amount of time a job is allowed to spend on the GPU before it
 	 * is killed. Such jobs won't be resumed if killed.
@@ -188,6 +212,25 @@ enum {
 	 * @see KBASE_CONFIG_ATTR_JS_SCHEDULING_TICK_NS
 	 */
 	KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_SS,
+
+	/**
+	 * Job Scheduler minimum number of scheduling ticks before CL jobs are hard-stopped.
+	 *
+	 * This defines the amount of time a job is allowed to spend on the GPU before it
+	 * is killed. Such jobs won't be resumed if killed.
+	 *
+	 * This value is supported by the following scheduling policies:
+	 * - The Completely Fair Share (CFS) policy
+	 *
+	 * Attached value: unsigned 32-bit kbasep_js_device_data::hard_stop_ticks_cl<br>
+	 * Default value: @ref DEFAULT_JS_HARD_STOP_TICKS_CL
+	 *
+	 * @note a value of zero means "the quickest time to hard-stop a job",
+	 * which is somewhere between instant and one tick later.
+	 *
+	 * @see KBASE_CONFIG_ATTR_JS_SCHEDULING_TICK_NS
+	 */
+	KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_CL,
 
 	/**
 	 * Job Scheduler minimum number of scheduling ticks before jobs are hard-stopped
@@ -283,8 +326,8 @@ enum {
 	KBASE_CONFIG_ATTR_JS_CFS_CTX_RUNTIME_MIN_SLICES,
 
 	/**
-	 * Job Scheduler minimum number of scheduling ticks before jobs cause the GPU to be
-	 * reset.
+	 * Job Scheduler minimum number of scheduling ticks before non-CL jobs
+	 * cause the GPU to be reset.
 	 *
 	 * This defines the amount of time a job is allowed to spend on the GPU before it
 	 * is assumed that the GPU has hung and needs to be reset. The assumes that the job
@@ -300,6 +343,25 @@ enum {
 	 * @see KBASE_CONFIG_ATTR_JS_SCHEDULING_TICK_NS
 	 */
 	KBASE_CONFIG_ATTR_JS_RESET_TICKS_SS,
+
+	/**
+	 * Job Scheduler minimum number of scheduling ticks before CL jobs
+	 * cause the GPU to be reset.
+	 *
+	 * This defines the amount of time a job is allowed to spend on the GPU before it 
+	 * is assumed that the GPU has hung and needs to be reset. The assumes that the job
+	 * has been hard-stopped already and so the presence of a job that has remained on
+	 * the GPU for so long indicates that the GPU has in some way hung.
+	 *
+	 * This value is supported by the following scheduling policies:
+	 * - The Completely Fair Share (CFS) policy
+	 *
+	 * Attached value: unsigned 32-bit kbasep_js_device_data::gpu_reset_ticks_cl<br>
+	 * Default value: @ref DEFAULT_JS_RESET_TICKS_CL
+	 *
+	 * @see KBASE_CONFIG_ATTR_JS_SCHEDULING_TICK_NS
+	 */
+	KBASE_CONFIG_ATTR_JS_RESET_TICKS_CL,
 
 	/**
 	 * Job Scheduler minimum number of scheduling ticks before jobs cause the GPU to be

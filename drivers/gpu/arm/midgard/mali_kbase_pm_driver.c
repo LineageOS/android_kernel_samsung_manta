@@ -761,11 +761,9 @@ static void kbase_pm_hw_issues(kbase_device *kbdev)
 	if (kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_ALTERNATIVE_HWC))
 		value |= SC_ALT_COUNTERS;
 
-#ifdef MALI_INCLUDE_SKRYMIR
-	/* Use software control of forward pixel kill when needed. See SKRYMIR-2189. */
+	/* Use software control of forward pixel kill when needed. See MIDEUR-174. */
 	if (kbase_hw_has_issue(kbdev, BASE_HW_ISSUE_T76X_2121))
 		value |= SC_OVERRIDE_FWD_PIXEL_KILL;
-#endif /* MALI_INCLUDE_SKRYMIR */
 
 	/* Needed due to MIDBASE-2795. ENABLE_TEXGRD_FLAGS. See PRLAM-10797. */
 	if (kbase_hw_has_issue(kbdev, BASE_HW_ISSUE_10797))

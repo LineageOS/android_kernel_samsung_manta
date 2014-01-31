@@ -584,11 +584,16 @@ void *kbasep_trace_seq_start(struct seq_file *s, loff_t *pos)
 	struct trace_seq_state *state = s->private;
 	int i;
 
-	i = (state->start + *pos) & KBASE_TRACE_MASK;
-	if (i >= state-> end)
+	if (*pos > KBASE_TRACE_SIZE)
+		return NULL;
+	i = state->start + *pos;
+	if ((state->end >= state->start && i >= state->end) ||
+			i >= state->end + KBASE_TRACE_SIZE)
 		return NULL;
 
-	return state;
+	i &= KBASE_TRACE_MASK;
+
+	return &state->trace_buf[i];
 }
 
 void kbasep_trace_seq_stop(struct seq_file *s, void *data)
@@ -603,7 +608,7 @@ void *kbasep_trace_seq_next(struct seq_file *s, void *data, loff_t *pos)
 	(*pos)++;
 
 	i = (state->start + *pos) & KBASE_TRACE_MASK;
-	if (i >= state->end)
+	if (i == state->end)
 		return NULL;
 
 	return &state->trace_buf[i];
@@ -655,7 +660,9 @@ static const struct file_operations kbasep_trace_debugfs_fops = {
 
 STATIC void kbasep_trace_debugfs_init(kbase_device *kbdev)
 {
-	kbdev->trace_dentry = debugfs_create_file("mali_trace", S_IRUGO, NULL, kbdev, &kbasep_trace_debugfs_fops);
+	kbdev->trace_dentry = debugfs_create_file("mali_trace", S_IRUGO,
+			kbdev->mali_debugfs_directory, kbdev,
+			&kbasep_trace_debugfs_fops);
 }
 #else
 STATIC void kbasep_trace_debugfs_init(kbase_device *kbdev)

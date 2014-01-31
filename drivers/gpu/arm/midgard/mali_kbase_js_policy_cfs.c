@@ -716,8 +716,19 @@ static enum hrtimer_restart timer_callback(struct hrtimer *timer)
 				u32 ticks = atom->sched_info.cfs.ticks++;
 
 #if !CINSTR_DUMPING_ENABLED
+				u32 soft_stop_ticks, hard_stop_ticks, gpu_reset_ticks;
+				if (atom->core_req & BASE_JD_REQ_ONLY_COMPUTE) {
+					soft_stop_ticks = js_devdata->soft_stop_ticks_cl;
+					hard_stop_ticks = js_devdata->hard_stop_ticks_cl;
+					gpu_reset_ticks = js_devdata->gpu_reset_ticks_cl;
+				} else {
+					soft_stop_ticks = js_devdata->soft_stop_ticks;
+					hard_stop_ticks = js_devdata->hard_stop_ticks_ss;
+					gpu_reset_ticks = js_devdata->gpu_reset_ticks_ss;
+				}
+
 				/* Job is Soft-Stoppable */
-				if (ticks == js_devdata->soft_stop_ticks) {
+				if (ticks == soft_stop_ticks) {
 					/* Job has been scheduled for at least js_devdata->soft_stop_ticks ticks.
 					 * Soft stop the slot so we can run other jobs.
 					 */
@@ -726,7 +737,7 @@ static enum hrtimer_restart timer_callback(struct hrtimer *timer)
 #if KBASE_DISABLE_SCHEDULING_SOFT_STOPS == 0
 					kbase_job_slot_softstop(kbdev, s, atom);
 #endif
-				} else if (ticks == js_devdata->hard_stop_ticks_ss) {
+				} else if (ticks == hard_stop_ticks) {
 					/* Job has been scheduled for at least js_devdata->hard_stop_ticks_ss ticks.
 					 * It should have been soft-stopped by now. Hard stop the slot.
 					 */
@@ -734,7 +745,7 @@ static enum hrtimer_restart timer_callback(struct hrtimer *timer)
 					KBASE_DEBUG_PRINT_WARN(KBASE_JM, "JS: Job Hard-Stopped (took more than %lu ticks at %lu ms/tick)", (unsigned long)ticks, (unsigned long)(js_devdata->scheduling_tick_ns / 1000000u));
 					kbase_job_slot_hardstop(atom->kctx, s, atom);
 #endif
-				} else if (ticks == js_devdata->gpu_reset_ticks_ss) {
+				} else if (ticks == gpu_reset_ticks) {
 					/* Job has been scheduled for at least js_devdata->gpu_reset_ticks_ss ticks.
 					 * It should have left the GPU by now. Signal that the GPU needs to be reset.
 					 */

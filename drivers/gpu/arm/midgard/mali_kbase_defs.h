@@ -417,11 +417,6 @@ typedef enum {
 } kbase_instr_state;
 
 typedef struct kbasep_mem_device {
-#ifdef CONFIG_UMP
-	u32 ump_device_id;	/* Which UMP device this GPU should be mapped to.
-				   Read-only, copied from platform configuration on startup. */
-#endif				/* CONFIG_UMP */
-
 	atomic_t used_pages;   /* Tracks usage of OS shared memory. Updated
 				   when OS memory is allocated/freed. */
 
@@ -669,17 +664,23 @@ struct kbase_device {
 #if MALI_CUSTOMER_RELEASE == 0
 	/* This is used to override the current job scheduler values for
 	 * KBASE_CONFIG_ATTR_JS_STOP_STOP_TICKS_SS
+	 * KBASE_CONFIG_ATTR_JS_STOP_STOP_TICKS_CL
 	 * KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_SS
+	 * KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_CL
 	 * KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_NSS
 	 * KBASE_CONFIG_ATTR_JS_RESET_TICKS_SS
+	 * KBASE_CONFIG_ATTR_JS_RESET_TICKS_CL
 	 * KBASE_CONFIG_ATTR_JS_RESET_TICKS_NSS.
 	 *
 	 * These values are set via the js_timeouts sysfs file.
 	 */
 	u32 js_soft_stop_ticks;
+	u32 js_soft_stop_ticks_cl;
 	u32 js_hard_stop_ticks_ss;
+	u32 js_hard_stop_ticks_cl;
 	u32 js_hard_stop_ticks_nss;
 	u32 js_reset_ticks_ss;
+	u32 js_reset_ticks_cl;
 	u32 js_reset_ticks_nss;
 #endif
 
@@ -724,12 +725,16 @@ struct kbase_context {
 	mali_bool event_closed;
 	struct workqueue_struct *event_workq;
 
+	u64 mem_attrs;
+
 	atomic_t                setup_complete;
 	atomic_t                setup_in_progress;
 
 	mali_bool keep_gpu_powered;
 
 	u64 *mmu_teardown_pages;
+
+	phys_addr_t aliasing_sink_page;
 
 	struct mutex            reg_lock; /* To be converted to a rwlock? */
 	struct rb_root          reg_rbtree; /* Red-Black tree of GPU regions (live regions) */

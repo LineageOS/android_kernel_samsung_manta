@@ -20,9 +20,7 @@
 #include <mali_kbase.h>
 #include <mali_kbase_defs.h>
 #include <mali_kbase_cpuprops.h>
-#ifdef CONFIG_UMP
-#include <linux/ump-common.h>
-#endif				/* CONFIG_UMP */
+#include <mali_kbase_config_defaults.h>
 
 /* Specifies how many attributes are permitted in the config (excluding terminating attribute).
  * This is used in validation function so we can detect if configuration is properly terminated. This value can be
@@ -32,133 +30,6 @@
 /* Limits for gpu frequency configuration parameters. These will use for config validation. */
 #define MAX_GPU_ALLOWED_FREQ_KHZ 1000000
 #define MIN_GPU_ALLOWED_FREQ_KHZ 1
-
-/* Default irq throttle time. This is the default desired minimum time in between two consecutive
- * interrupts from the gpu. The irq throttle gpu register is set after this value. */
-#define DEFAULT_IRQ_THROTTLE_TIME_US 20
-
-/*** Begin Scheduling defaults ***/
-
-/**
- * Default scheduling tick granuality, in nanoseconds
- */
-#define DEFAULT_JS_SCHEDULING_TICK_NS 100000000u  /* 100ms */
-
-/**
- * Default minimum number of scheduling ticks before jobs are soft-stopped.
- *
- * This defines the time-slice for a job (which may be different from that of a context)
- */
-#define DEFAULT_JS_SOFT_STOP_TICKS 1	/* Between 0.1 and 0.2s before soft-stop */
-
-/**
- * Default minimum number of scheduling ticks before jobs are hard-stopped
- */
-#define DEFAULT_JS_HARD_STOP_TICKS_SS_HW_ISSUE_8408 12	/* 1.2s before hard-stop, for a certain GLES2 test at 128x128 (bound by combined vertex+tiler job) */
-#define DEFAULT_JS_HARD_STOP_TICKS_SS 2	/* Between 0.2 and 0.3s before hard-stop */
-
-/**
- * Default minimum number of scheduling ticks before jobs are hard-stopped
- * during dumping
- */
-#define DEFAULT_JS_HARD_STOP_TICKS_NSS 600	/* 60s @ 100ms tick */
-
-/**
- * Default minimum number of scheduling ticks before the GPU is reset
- * to clear a "stuck" job
- */
-#define DEFAULT_JS_RESET_TICKS_SS_HW_ISSUE_8408 18	/* 1.8s before resetting GPU, for a certain GLES2 test at 128x128 (bound by combined vertex+tiler job) */
-#define DEFAULT_JS_RESET_TICKS_SS 3	/* 0.3-0.4s before GPU is reset */
-
-/**
- * Default minimum number of scheduling ticks before the GPU is reset
- * to clear a "stuck" job during dumping.
- */
-#define DEFAULT_JS_RESET_TICKS_NSS 601	/* 60.1s @ 100ms tick */
-
-/**
- * Number of milliseconds given for other jobs on the GPU to be
- * soft-stopped when the GPU needs to be reset.
- */
-#define DEFAULT_JS_RESET_TIMEOUT_MS 3000
-
-/**
- * Default timeslice that a context is scheduled in for, in nanoseconds.
- *
- * When a context has used up this amount of time across its jobs, it is
- * scheduled out to let another run.
- *
- * @note the resolution is nanoseconds (ns) here, because that's the format
- * often used by the OS.
- */
-#define DEFAULT_JS_CTX_TIMESLICE_NS 50000000	/* 0.05s - at 20fps a ctx does at least 1 frame before being scheduled out. At 40fps, 2 frames, etc */
-
-/**
- * Default initial runtime of a context for CFS, in ticks.
- *
- * This value is relative to that of the least-run context, and defines where
- * in the CFS queue a new context is added.
- */
-#define DEFAULT_JS_CFS_CTX_RUNTIME_INIT_SLICES 1
-
-/**
- * Default minimum runtime value of a context for CFS, in ticks.
- *
- * This value is relative to that of the least-run context. This prevents
- * "stored-up timeslices" DoS attacks.
- */
-#define DEFAULT_JS_CFS_CTX_RUNTIME_MIN_SLICES 2
-
-/**
- * Default setting for whether to prefer security or performance.
- *
- * Currently affects only r0p0-15dev0 HW and earlier.
- */
-#define DEFAULT_SECURE_BUT_LOSS_OF_PERFORMANCE MALI_FALSE
-
-/**
- * Default setting for read Address ID limiting on AXI.
- */
-#define DEFAULT_ARID_LIMIT KBASE_AID_32
-
-/**
- * Default setting for write Address ID limiting on AXI.
- */
-#define DEFAULT_AWID_LIMIT KBASE_AID_32
-
-/**
- * Default setting for using alternative hardware counters.
- */
-#define DEFAULT_ALTERNATIVE_HWC MALI_FALSE
-
-/*** End Scheduling defaults ***/
-
-/*** Begin Power Manager defaults */
-
-#define DEFAULT_PM_DVFS_FREQ 500 /* Milliseconds */
-
-/**
- * Default poweroff tick granuality, in nanoseconds
- */
-#define DEFAULT_PM_GPU_POWEROFF_TICK_NS 400000 /* 400us */
-
-/**
- * Default number of poweroff ticks before shader cores are powered off
- */
-#define DEFAULT_PM_POWEROFF_TICK_SHADER 2      /* 400-800us */
-
-/**
- * Default number of poweroff ticks before GPU is powered off
- */
-#define DEFAULT_PM_POWEROFF_TICK_GPU 2         /* 400-800us */
-
-/*** End Power Manager defaults ***/
-
-/**
- * Default value for KBASE_CONFIG_ATTR_CPU_SPEED_FUNC.
- * Points to @ref kbase_cpuprops_get_default_clock_speed.
- */
-#define DEFAULT_CPU_SPEED_FUNC ((uintptr_t)kbase_cpuprops_get_default_clock_speed)
 
 int kbasep_get_config_attribute_count(const kbase_attribute *attributes)
 {
@@ -202,10 +73,6 @@ uintptr_t kbasep_get_config_value(struct kbase_device *kbdev, const kbase_attrib
 
 	/* default values */
 	switch (attribute_id) {
-#ifdef CONFIG_UMP
-	case KBASE_CONFIG_ATTR_UMP_DEVICE:
-		return UMP_DEVICE_W_SHIFT;
-#endif				/* CONFIG_UMP */
 	case KBASE_CONFIG_ATTR_GPU_IRQ_THROTTLE_TIME_US:
 		return DEFAULT_IRQ_THROTTLE_TIME_US;
 		/* Begin scheduling defaults */
@@ -213,11 +80,15 @@ uintptr_t kbasep_get_config_value(struct kbase_device *kbdev, const kbase_attrib
 		return DEFAULT_JS_SCHEDULING_TICK_NS;
 	case KBASE_CONFIG_ATTR_JS_SOFT_STOP_TICKS:
 		return DEFAULT_JS_SOFT_STOP_TICKS;
+	case KBASE_CONFIG_ATTR_JS_SOFT_STOP_TICKS_CL:
+		return DEFAULT_JS_SOFT_STOP_TICKS_CL;
 	case KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_SS:
 		if (kbase_hw_has_issue(kbdev, BASE_HW_ISSUE_8408))
 			return DEFAULT_JS_HARD_STOP_TICKS_SS_HW_ISSUE_8408;
 		else
 			return DEFAULT_JS_HARD_STOP_TICKS_SS;
+	case KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_CL:
+		return DEFAULT_JS_HARD_STOP_TICKS_CL;
 	case KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_NSS:
 		return DEFAULT_JS_HARD_STOP_TICKS_NSS;
 	case KBASE_CONFIG_ATTR_JS_CTX_TIMESLICE_NS:
@@ -231,6 +102,8 @@ uintptr_t kbasep_get_config_value(struct kbase_device *kbdev, const kbase_attrib
 			return DEFAULT_JS_RESET_TICKS_SS_HW_ISSUE_8408;
 		else
 			return DEFAULT_JS_RESET_TICKS_SS;
+	case KBASE_CONFIG_ATTR_JS_RESET_TICKS_CL:
+		return DEFAULT_JS_RESET_TICKS_CL;
 	case KBASE_CONFIG_ATTR_JS_RESET_TICKS_NSS:
 		return DEFAULT_JS_RESET_TICKS_NSS;
 	case KBASE_CONFIG_ATTR_JS_RESET_TIMEOUT_MS:
@@ -292,26 +165,6 @@ void kbasep_platform_device_term(kbase_device *kbdev)
 	}
 }
 
-#ifdef CONFIG_UMP
-static mali_bool kbasep_validate_ump_device(int ump_device)
-{
-	mali_bool valid;
-
-	switch (ump_device) {
-	case UMP_DEVICE_W_SHIFT:
-	case UMP_DEVICE_X_SHIFT:
-	case UMP_DEVICE_Y_SHIFT:
-	case UMP_DEVICE_Z_SHIFT:
-		valid = MALI_TRUE;
-		break;
-	default:
-		valid = MALI_FALSE;
-		break;
-	}
-	return valid;
-}
-#endif				/* CONFIG_UMP */
-
 static mali_bool kbasep_validate_gpu_clock_freq(kbase_device *kbdev, const kbase_attribute *attributes)
 {
 	uintptr_t freq_min = kbasep_get_config_value(kbdev, attributes, KBASE_CONFIG_ATTR_GPU_FREQ_KHZ_MIN);
@@ -358,15 +211,6 @@ mali_bool kbasep_validate_configuration_attributes(kbase_device *kbdev, const kb
 		}
 
 		switch (attributes[i].id) {
-#ifdef CONFIG_UMP
-		case KBASE_CONFIG_ATTR_UMP_DEVICE:
-			if (MALI_FALSE == kbasep_validate_ump_device(attributes[i].data)) {
-				KBASE_DEBUG_PRINT_WARN(KBASE_CORE, "Unknown UMP device found in configuration: %d", (int)attributes[i].data);
-				return MALI_FALSE;
-			}
-			break;
-#endif				/* CONFIG_UMP */
-
 		case KBASE_CONFIG_ATTR_GPU_FREQ_KHZ_MIN:
 			had_gpu_freq_min = MALI_TRUE;
 			if (MALI_FALSE == kbasep_validate_gpu_clock_freq(kbdev, attributes)) {
@@ -398,9 +242,12 @@ mali_bool kbasep_validate_configuration_attributes(kbase_device *kbdev, const kb
 
 			/* All these Job Scheduling attributes are FALLTHROUGH: only unsigned 32-bit values accepted */
 		case KBASE_CONFIG_ATTR_JS_SOFT_STOP_TICKS:
+		case KBASE_CONFIG_ATTR_JS_SOFT_STOP_TICKS_CL:
 		case KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_SS:
+		case KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_CL:
 		case KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_NSS:
 		case KBASE_CONFIG_ATTR_JS_RESET_TICKS_SS:
+		case KBASE_CONFIG_ATTR_JS_RESET_TICKS_CL:
 		case KBASE_CONFIG_ATTR_JS_RESET_TICKS_NSS:
 		case KBASE_CONFIG_ATTR_JS_RESET_TIMEOUT_MS:
 		case KBASE_CONFIG_ATTR_JS_CTX_TIMESLICE_NS:

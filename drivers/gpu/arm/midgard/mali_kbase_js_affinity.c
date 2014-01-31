@@ -147,7 +147,7 @@ mali_bool kbase_js_can_run_job_on_slot_no_lock(kbase_device *kbdev, int js)
  * implement, this function is just an intermediate step that
  * assumes:
  * - all working cores will be powered on when this is called.
- * - largest current configuration is a T658 (2x4 cores).
+ * - largest current configuration is 2 core groups.
  * - It has been decided not to have hardcoded values so the low
  *   and high cores in a core split will be evently distributed.
  * - Odd combinations of core requirements have been filtered out
