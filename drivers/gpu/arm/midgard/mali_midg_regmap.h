@@ -52,8 +52,7 @@
 #define CLEAN_CACHES_COMPLETED  (1 << 17)	/* Set when a cache clean operation has completed. */
 
 #define GPU_IRQ_REG_ALL (GPU_FAULT | MULTIPLE_GPU_FAULTS | RESET_COMPLETED \
-			| POWER_CHANGED_ALL | PRFCNT_SAMPLE_COMPLETED \
-			| CLEAN_CACHES_COMPLETED)
+			| POWER_CHANGED_ALL | PRFCNT_SAMPLE_COMPLETED)
 
 #define GPU_COMMAND             0x030	/* (WO) */
 #define GPU_STATUS              0x034	/* (RO) */
@@ -332,7 +331,7 @@
 #define ASn_COMMAND_LOCK        0x02	/* Issue a lock region command to all MMUs */
 #define ASn_COMMAND_UNLOCK      0x03	/* Issue a flush region command to all MMUs */
 #define ASn_COMMAND_FLUSH       0x04	/* Flush all L2 caches then issue a flush region command to all MMUs
-					   (deprecated - only for use with T60x/T65x) */
+					   (deprecated - only for use with T60x) */
 #define ASn_COMMAND_FLUSH_PT    0x04	/* Flush all L2 caches then issue a flush region command to all MMUs */
 #define ASn_COMMAND_FLUSH_MEM   0x05	/* Wait for memory accesses to complete, flush all the L1s cache then
 					   flush all L2 caches then issue a flush region command to all MMUs */
@@ -410,9 +409,21 @@
 #define PRFCNT_CONFIG_MODE_MANUAL 1	/* The performance counters are enabled, but are only written out when a PRFCNT_SAMPLE command is issued using the GPU_COMMAND register. */
 #define PRFCNT_CONFIG_MODE_TILE   2	/* The performance counters are enabled, and are written out each time a tile finishes rendering. */
 
-/* AS<n>_MEMATTR values */
-#define ASn_MEMATTR_IMPL_DEF_CACHE_POLICY 0x48484848	/* Use GPU implementation-defined caching policy. */
-#define ASn_MEMATTR_FORCE_TO_CACHE_ALL    0x4F4F4F4F	/* The attribute set to force all resources to be cached. */
+/* AS<n>_MEMATTR values: */
+/* Use GPU implementation-defined  caching policy. */
+#define ASn_MEMATTR_IMPL_DEF_CACHE_POLICY 0x48
+/* The attribute set to force all resources to be cached. */
+#define ASn_MEMATTR_FORCE_TO_CACHE_ALL    0x4F
+/* Inner write-alloc cache setup, no outer caching */
+#define ASn_MEMATTR_WRITE_ALLOC           0x4D
+/* symbol for default MEMATTR to use */
+#define ASn_MEMATTR_INDEX_DEFAULT               0
+/* HW implementation defined caching */
+#define ASn_MEMATTR_INDEX_IMPL_DEF_CACHE_POLICY 0
+/* Force cache on */
+#define ASn_MEMATTR_INDEX_FORCE_TO_CACHE_ALL    1
+/* Write-alloc inner */
+#define ASn_MEMATTR_INDEX_WRITE_ALLOC           2
 
 /* GPU_ID register */
 #define GPU_ID_VERSION_STATUS_SHIFT       0
@@ -426,17 +437,12 @@
 
 /* Values for GPU_ID_VERSION_PRODUCT_ID bitfield */
 #define GPU_ID_PI_T60X                    0x6956
-#define GPU_ID_PI_T65X                    0x3456
 #define GPU_ID_PI_T62X                    0x0620
 #define GPU_ID_PI_T67X                    0x0670
-#ifdef MALI_INCLUDE_SKRYMIR
 #define GPU_ID_PI_T76X                    0x0750
-#endif /* MALI_INCLUDE_SKRYMIR */
-#ifdef MALI_INCLUDE_SKADI
 #define GPU_ID_PI_T72X                    0x0720
-#endif /* MALI_INCLUDE_SKADI */
 
-/* Values for GPU_ID_VERSION_STATUS field for PRODUCT_ID GPU_ID_PI_T60X and GPU_ID_PI_T65X */
+/* Values for GPU_ID_VERSION_STATUS field for PRODUCT_ID GPU_ID_PI_T60X */
 #define GPU_ID_S_15DEV0                   0x1
 #define GPU_ID_S_EAC                      0x2
 

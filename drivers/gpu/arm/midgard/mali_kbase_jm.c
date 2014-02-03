@@ -988,25 +988,37 @@ void kbase_job_slot_softstop(kbase_device *kbdev, int js, kbase_jd_atom *target_
  *
  * The job slot lock must be held when calling this function.
  *
- * @param kctx          The kbase context that contains the job(s) that should be hard-stopped
- * @param js            The job slot to hard-stop
- * @param target_katom  The job that should be hard-stopped (or NULL for all jobs from the context)
+ * @param kctx		The kbase context that contains the job(s) that should
+ *			be hard-stopped
+ * @param js		The job slot to hard-stop
+ * @param target_katom	The job that should be hard-stopped (or NULL for all
+ *			jobs from the context)
  */
-void kbase_job_slot_hardstop(kbase_context *kctx, int js, kbase_jd_atom *target_katom)
+void kbase_job_slot_hardstop(kbase_context *kctx, int js,
+				kbase_jd_atom *target_katom)
 {
 	kbase_device *kbdev = kctx->kbdev;
-	kbasep_job_slot_soft_or_hard_stop(kbdev, kctx, js, target_katom, JSn_COMMAND_HARD_STOP);
 
-	if (kbase_hw_has_issue(kctx->kbdev, BASE_HW_ISSUE_8401) || kbase_hw_has_issue(kctx->kbdev, BASE_HW_ISSUE_9510)) {
-		/* The workaround for HW issue 8401 has an issue, so instead of hard-stopping
-		 * just reset the GPU. This will ensure that the jobs leave the GPU.
-		 */
+	kbasep_job_slot_soft_or_hard_stop(kbdev, kctx, js, target_katom,
+						JSn_COMMAND_HARD_STOP);
+	if (kbase_hw_has_issue(kctx->kbdev, BASE_HW_ISSUE_8401) ||
+		kbase_hw_has_issue(kctx->kbdev, BASE_HW_ISSUE_9510) ||
+		(kbase_hw_has_issue(kctx->kbdev, BASE_HW_ISSUE_T76X_3542) &&
+		(target_katom == NULL || target_katom->core_req & BASE_JD_REQ_FS_AFBC))) {
+		/* MIDBASE-2916 if a fragment job with AFBC encoding is
+		 * hardstopped, ensure to do a soft reset also in order to
+		 * clear the GPU status.
+		 * Workaround for HW issue 8401 has an issue,so after
+		 * hard-stopping just reset the GPU. This will ensure that the
+		 * jobs leave the GPU.*/
 		if (kbase_prepare_to_reset_gpu_locked(kbdev)) {
-			KBASE_DEBUG_PRINT_ERROR(KBASE_JD, "Issueing GPU soft-reset instead of hard stopping job due to a hardware issue");
+			KBASE_DEBUG_PRINT_ERROR(KBASE_JD, "Issueing GPU\
+			soft-reset after hard stopping due to hardware issue");
 			kbase_reset_gpu_locked(kbdev);
 		}
 	}
 }
+
 
 void kbase_debug_dump_registers(kbase_device *kbdev)
 {

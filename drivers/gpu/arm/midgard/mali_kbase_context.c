@@ -90,14 +90,17 @@ kbase_context *kbase_create_context(kbase_device *kbdev)
 	if (!kctx->pgd)
 		goto free_mmu;
 
+	if (MALI_ERROR_NONE != kbase_mem_allocator_alloc(&kctx->osalloc, 1, &kctx->aliasing_sink_page))
+		goto no_sink_page;
+
 	if (kbase_create_os_context(&kctx->osctx))
-		goto free_pgd;
+		goto no_os_context;
 
 	kctx->cookies = KBASE_COOKIE_MASK;
 
 	/* Make sure page 0 is not used... */
 	if (kbase_region_tracker_init(kctx))
-		goto free_osctx;
+		goto no_region_tracker;
 #ifdef CONFIG_GPU_TRACEPOINTS
 	atomic_set(&kctx->jctx.work_id, 0);
 #endif
@@ -107,23 +110,25 @@ kbase_context *kbase_create_context(kbase_device *kbdev)
 
 	return kctx;
 
- free_osctx:
+no_region_tracker:
 	kbase_destroy_os_context(&kctx->osctx);
- free_pgd:
+no_sink_page:
+	kbase_mem_allocator_free(&kctx->osalloc, 1, &kctx->aliasing_sink_page, 0);
+no_os_context:
 	kbase_mmu_free_pgd(kctx);
- free_mmu:
+free_mmu:
 	kbase_mmu_term(kctx);
- free_event:
+free_event:
 	kbase_event_cleanup(kctx);
- free_jd:
+free_jd:
 	/* Safe to call this one even when didn't initialize (assuming kctx was sufficiently zeroed) */
 	kbasep_js_kctx_term(kctx);
 	kbase_jd_exit(kctx);
- free_allocator:
+free_allocator:
 	kbase_mem_allocator_term(&kctx->osalloc);
- free_kctx:
+free_kctx:
     vfree(kctx);
- out:
+out:
 	return NULL;
 
 }
@@ -174,6 +179,9 @@ void kbase_destroy_context(kbase_context *kctx)
 
 	/* MMU is disabled as part of scheduling out the context */
 	kbase_mmu_free_pgd(kctx);
+
+	/* drop the aliasing sink page now that it can't be mapped anymore */
+	kbase_mem_allocator_free(&kctx->osalloc, 1, &kctx->aliasing_sink_page, 0);
 
 	/* free pending region setups */
 	pending_regions_to_clean = (~kctx->cookies) & KBASE_COOKIE_MASK;

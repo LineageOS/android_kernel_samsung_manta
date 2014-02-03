@@ -16,7 +16,7 @@
 
 
 /**
- * @file mali_kernel_pm_ca_random_test.h
+ * @file mali_kbase_pm_ca_random_test.h
  */
 
 #ifndef _KERNEL_PM_CA_RANDOM_TEST_H

@@ -47,7 +47,7 @@
 #include "mali_kbase_gpuprops_types.h"
 
 #define BASE_UK_VERSION_MAJOR 5
-#define BASE_UK_VERSION_MINOR 0
+#define BASE_UK_VERSION_MINOR 1
 
 typedef struct kbase_uk_mem_alloc {
 	uk_header header;
@@ -70,6 +70,22 @@ typedef struct kbase_uk_mem_free {
 	/* OUT */
 } kbase_uk_mem_free;
 
+/* used by both aliasing and importing */
+#define KBASE_MEM_NEED_MMAP         (1UL << BASE_MEM_FLAGS_NR_BITS)
+
+typedef struct kbase_uk_mem_alias {
+	uk_header header;
+	/* IN/OUT */
+	u64 flags;
+	/* IN */
+	u64 stride;
+	u64 nents;
+	kbase_pointer ai;
+	/* OUT */
+	u64         gpu_va;
+	u64         va_pages;
+} kbase_uk_mem_alias;
+
 typedef struct kbase_uk_mem_import {
 	uk_header header;
 	/* IN */
@@ -77,7 +93,6 @@ typedef struct kbase_uk_mem_import {
 	u32 type;
 	u32 padding;
 	/* IN/OUT */
-#define KBASE_MEM_IMPORT_MMAP         (1UL << BASE_MEM_FLAGS_NR_BITS)
 #define KBASE_MEM_IMPORT_HAVE_PAGES   (1UL << (BASE_MEM_FLAGS_NR_BITS + 1))
 	u64         flags;
 	/* OUT */
@@ -312,7 +327,9 @@ typedef enum kbase_uk_function_id {
 	KBASE_FUNC_FENCE_VALIDATE,
 	KBASE_FUNC_STREAM_CREATE,
 	KBASE_FUNC_GET_PROFILING_CONTROLS,
-	KBASE_FUNC_SET_PROFILING_CONTROLS /* to be used only for testing purposes, otherwise these controls are set through gator API */
+	KBASE_FUNC_SET_PROFILING_CONTROLS, /* to be used only for testing purposes, otherwise these controls are set through gator API */
+
+	KBASE_FUNC_MEM_ALIAS /* can be moved up along with the other MEM functions on the next API major version upgrade */
 } kbase_uk_function_id;
 
 #endif				/* _KBASE_UKU_H_ */

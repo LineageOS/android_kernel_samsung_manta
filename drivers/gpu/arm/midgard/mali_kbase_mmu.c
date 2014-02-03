@@ -206,12 +206,10 @@ static void page_fault_worker(struct work_struct *data)
 		kbase_reg_write(kbdev, MMU_AS_REG(as_no, ASn_LOCKADDR_LO), lock_addr & 0xFFFFFFFFUL, kctx);
 		kbase_reg_write(kbdev, MMU_AS_REG(as_no, ASn_LOCKADDR_HI), lock_addr >> 32, kctx);
 		kbase_reg_write(kbdev, MMU_AS_REG(as_no, ASn_COMMAND), ASn_COMMAND_LOCK, kctx);
-#ifdef MALI_INCLUDE_SKRYMIR
 		if (kbase_hw_has_issue(kbdev, BASE_HW_ISSUE_T76X_3285)) {
 			kbase_reg_write(kbdev, MMU_REG(MMU_IRQ_CLEAR), (1UL << as_no), NULL);
 			kbase_reg_write(kbdev, MMU_AS_REG(as_no, ASn_COMMAND), ASn_COMMAND_LOCK, kctx);
 		}
-#endif /* MALI_INCLUDE_SKRYMIR */
 
 		/* set up the new pages */
 		err = kbase_mmu_insert_pages(kctx, region->start_pfn + kbase_reg_current_backed_size(region) - new_pages, &kbase_get_phy_pages(region)[kbase_reg_current_backed_size(region) - new_pages], new_pages, region->flags);
@@ -432,14 +430,16 @@ static phys_addr_t mmu_insert_pages_recover_get_bottom_pgd(kbase_context *kctx, 
 	return pgd;
 }
 
-static void mmu_insert_pages_failure_recovery(kbase_context *kctx, u64 vpfn, phys_addr_t *phys, size_t nr)
+static void mmu_insert_pages_failure_recovery(kbase_context *kctx, u64 vpfn,
+					      size_t nr)
 {
 	phys_addr_t pgd;
 	u64 *pgd_page;
 
 	KBASE_DEBUG_ASSERT(NULL != kctx);
 	KBASE_DEBUG_ASSERT(0 != vpfn);
-	KBASE_DEBUG_ASSERT(vpfn <= (UINT64_MAX / PAGE_SIZE));	/* 64-bit address range is the max */
+	/* 64-bit address range is the max */
+	KBASE_DEBUG_ASSERT(vpfn <= (UINT64_MAX / PAGE_SIZE));
 
 	lockdep_assert_held(&kctx->reg_lock);
 
@@ -459,13 +459,14 @@ static void mmu_insert_pages_failure_recovery(kbase_context *kctx, u64 vpfn, phy
 
 		/* Invalidate the entries we added */
 		for (i = 0; i < count; i++)
-			page_table_entry_set( kctx->kbdev, &pgd_page[index + i], ENTRY_IS_INVAL );
+			page_table_entry_set(kctx->kbdev, &pgd_page[index + i],
+					     ENTRY_IS_INVAL);
 
-		phys += count;
 		vpfn += count;
 		nr -= count;
 
-		ksync_kern_vrange_gpu(pgd + (index * sizeof(u64)), pgd_page + index, count * sizeof(u64));
+		ksync_kern_vrange_gpu(pgd + (index * sizeof(u64)),
+				      pgd_page + index, count * sizeof(u64));
 
 		kunmap_atomic(pgd_page);
 	}
@@ -476,11 +477,17 @@ static void mmu_insert_pages_failure_recovery(kbase_context *kctx, u64 vpfn, phy
  */
 static u64 kbase_mmu_get_mmu_flags(unsigned long flags)
 {
-	u64 mmu_flags = 0;
+	u64 mmu_flags;
 
-	mmu_flags |= (flags & KBASE_REG_GPU_WR) ? ENTRY_WR_BIT : 0;	/* write perm if requested */
-	mmu_flags |= (flags & KBASE_REG_GPU_RD) ? ENTRY_RD_BIT : 0;	/* read perm if requested */
-	mmu_flags |= (flags & KBASE_REG_GPU_NX) ? ENTRY_NX_BIT : 0;	/* nx if requested */
+	/* store mem_attr index as 4:2 (macro called ensures 3 bits already) */
+	mmu_flags = KBASE_REG_MEMATTR_VALUE(flags) << 2;
+
+	/* write perm if requested */
+	mmu_flags |= (flags & KBASE_REG_GPU_WR) ? ENTRY_WR_BIT : 0;
+	/* read perm if requested */
+	mmu_flags |= (flags & KBASE_REG_GPU_RD) ? ENTRY_RD_BIT : 0;
+	/* nx if requested */
+	mmu_flags |= (flags & KBASE_REG_GPU_NX) ? ENTRY_NX_BIT : 0;
 
 	if (flags & KBASE_REG_SHARE_BOTH) {
 		/* inner and outer shareable */
@@ -492,23 +499,121 @@ static u64 kbase_mmu_get_mmu_flags(unsigned long flags)
 
 	return mmu_flags;
 }
+
 /*
- * Map 'nr' pages pointed to by 'phys' at GPU PFN 'vpfn'
+ * Map the single page 'phys' 'nr' of times, starting at GPU PFN 'vpfn'
  */
-mali_error kbase_mmu_insert_pages(kbase_context *kctx, u64 vpfn, phys_addr_t *phys, size_t nr, unsigned long flags)
+mali_error kbase_mmu_insert_single_page(kbase_context *kctx, u64 vpfn,
+					phys_addr_t phys, size_t nr,
+					unsigned long flags)
 {
 	phys_addr_t pgd;
 	u64 *pgd_page;
-	u64 mmu_flags = 0;
-	/* In case the insert_pages only partially completes we need to be able to recover */
+	u64 pte_entry;
+	/* In case the insert_single_page only partially completes we need to be
+	 * able to recover */
 	mali_bool recover_required = MALI_FALSE;
 	u64 recover_vpfn = vpfn;
-	phys_addr_t *recover_phys = phys;
 	size_t recover_count = 0;
 
 	KBASE_DEBUG_ASSERT(NULL != kctx);
 	KBASE_DEBUG_ASSERT(0 != vpfn);
-	KBASE_DEBUG_ASSERT(vpfn <= (UINT64_MAX / PAGE_SIZE));	/* 64-bit address range is the max */
+	/* 64-bit address range is the max */
+	KBASE_DEBUG_ASSERT(vpfn <= (UINT64_MAX / PAGE_SIZE));
+
+	lockdep_assert_held(&kctx->reg_lock);
+
+	/* the one entry we'll populate everywhere */
+	pte_entry = mmu_phyaddr_to_ate(phys, kbase_mmu_get_mmu_flags(flags));
+
+	while (nr) {
+		unsigned int i;
+		unsigned int index = vpfn & 0x1FF;
+		unsigned int count = KBASE_MMU_PAGE_ENTRIES - index;
+
+		if (count > nr)
+			count = nr;
+
+		/*
+		 * Repeatedly calling mmu_get_bottom_pte() is clearly
+		 * suboptimal. We don't have to re-parse the whole tree
+		 * each time (just cache the l0-l2 sequence).
+		 * On the other hand, it's only a gain when we map more than
+		 * 256 pages at once (on average). Do we really care?
+		 */
+		pgd = mmu_get_bottom_pgd(kctx, vpfn);
+		if (!pgd) {
+			KBASE_DEBUG_PRINT_WARN(KBASE_MMU,
+					       "kbase_mmu_insert_pages: "
+					       "mmu_get_bottom_pgd failure\n");
+			if (recover_required) {
+				/* Invalidate the pages we have partially
+				 * completed */
+				mmu_insert_pages_failure_recovery(kctx,
+								  recover_vpfn,
+								  recover_count);
+			}
+			return MALI_ERROR_FUNCTION_FAILED;
+		}
+
+		pgd_page = kmap(pfn_to_page(PFN_DOWN(pgd)));
+		if (!pgd_page) {
+			KBASE_DEBUG_PRINT_WARN(KBASE_MMU,
+					       "kbase_mmu_insert_pages: "
+					       "kmap failure\n");
+			if (recover_required) {
+				/* Invalidate the pages we have partially
+				 * completed */
+				mmu_insert_pages_failure_recovery(kctx,
+								  recover_vpfn,
+								  recover_count);
+			}
+			return MALI_ERROR_OUT_OF_MEMORY;
+		}
+
+		for (i = 0; i < count; i++) {
+			unsigned int ofs = index + i;
+			KBASE_DEBUG_ASSERT(0 == (pgd_page[ofs] & 1UL));
+			page_table_entry_set(kctx->kbdev, &pgd_page[ofs],
+					     pte_entry);
+		}
+
+		vpfn += count;
+		nr -= count;
+
+		ksync_kern_vrange_gpu(pgd + (index * sizeof(u64)),
+				      pgd_page + index, count * sizeof(u64));
+
+		kunmap(pfn_to_page(PFN_DOWN(pgd)));
+		/* We have started modifying the page table.
+		 * If further pages need inserting and fail we need to undo what
+		 * has already taken place */
+		recover_required = MALI_TRUE;
+		recover_count += count;
+	}
+	return MALI_ERROR_NONE;
+}
+
+/*
+ * Map 'nr' pages pointed to by 'phys' at GPU PFN 'vpfn'
+ */
+mali_error kbase_mmu_insert_pages(kbase_context *kctx, u64 vpfn,
+				  phys_addr_t *phys, size_t nr,
+				  unsigned long flags)
+{
+	phys_addr_t pgd;
+	u64 *pgd_page;
+	u64 mmu_flags = 0;
+	/* In case the insert_pages only partially completes we need to be able
+	 * to recover */
+	mali_bool recover_required = MALI_FALSE;
+	u64 recover_vpfn = vpfn;
+	size_t recover_count = 0;
+
+	KBASE_DEBUG_ASSERT(NULL != kctx);
+	KBASE_DEBUG_ASSERT(0 != vpfn);
+	/* 64-bit address range is the max */
+	KBASE_DEBUG_ASSERT(vpfn <= (UINT64_MAX / PAGE_SIZE));
 
 	lockdep_assert_held(&kctx->reg_lock);
 
@@ -531,20 +636,30 @@ mali_error kbase_mmu_insert_pages(kbase_context *kctx, u64 vpfn, phys_addr_t *ph
 		 */
 		pgd = mmu_get_bottom_pgd(kctx, vpfn);
 		if (!pgd) {
-			KBASE_DEBUG_PRINT_WARN(KBASE_MMU, "kbase_mmu_insert_pages: mmu_get_bottom_pgd failure\n");
+			KBASE_DEBUG_PRINT_WARN(KBASE_MMU,
+					       "kbase_mmu_insert_pages: "
+					       "mmu_get_bottom_pgd failure\n");
 			if (recover_required) {
-				/* Invalidate the pages we have partially completed */
-				mmu_insert_pages_failure_recovery(kctx, recover_vpfn, recover_phys, recover_count);
+				/* Invalidate the pages we have partially
+				 * completed */
+				mmu_insert_pages_failure_recovery(kctx,
+								  recover_vpfn,
+								  recover_count);
 			}
 			return MALI_ERROR_FUNCTION_FAILED;
 		}
 
 		pgd_page = kmap(pfn_to_page(PFN_DOWN(pgd)));
 		if (!pgd_page) {
-			KBASE_DEBUG_PRINT_WARN(KBASE_MMU, "kbase_mmu_insert_pages: kmap failure\n");
+			KBASE_DEBUG_PRINT_WARN(KBASE_MMU,
+					       "kbase_mmu_insert_pages: "
+					       "kmap failure\n");
 			if (recover_required) {
-				/* Invalidate the pages we have partially completed */
-				mmu_insert_pages_failure_recovery(kctx, recover_vpfn, recover_phys, recover_count);
+				/* Invalidate the pages we have partially
+				 * completed */
+				mmu_insert_pages_failure_recovery(kctx,
+								  recover_vpfn,
+								  recover_count);
 			}
 			return MALI_ERROR_OUT_OF_MEMORY;
 		}
@@ -552,18 +667,23 @@ mali_error kbase_mmu_insert_pages(kbase_context *kctx, u64 vpfn, phys_addr_t *ph
 		for (i = 0; i < count; i++) {
 			unsigned int ofs = index + i;
 			KBASE_DEBUG_ASSERT(0 == (pgd_page[ofs] & 1UL));
-			page_table_entry_set( kctx->kbdev, &pgd_page[ofs], mmu_phyaddr_to_ate(phys[i], mmu_flags) );
+			page_table_entry_set(kctx->kbdev, &pgd_page[ofs],
+					     mmu_phyaddr_to_ate(phys[i],
+								mmu_flags)
+					     );
 		}
 
 		phys += count;
 		vpfn += count;
 		nr -= count;
 
-		ksync_kern_vrange_gpu(pgd + (index * sizeof(u64)), pgd_page + index, count * sizeof(u64));
+		ksync_kern_vrange_gpu(pgd + (index * sizeof(u64)),
+				      pgd_page + index, count * sizeof(u64));
 
 		kunmap(pfn_to_page(PFN_DOWN(pgd)));
-		/* We have started modifying the page table. If further pages need inserting and fail we need to
-		 * undo what has already taken place */
+		/* We have started modifying the page table. If further pages
+		 * need inserting and fail we need to undo what has already
+		 * taken place */
 		recover_required = MALI_TRUE;
 		recover_count += count;
 	}
@@ -860,6 +980,14 @@ mali_error kbase_mmu_init(kbase_context *kctx)
 
 	/* Preallocate MMU depth of four pages for mmu_teardown_level to use */
 	kctx->mmu_teardown_pages = kmalloc(PAGE_SIZE * 4, GFP_KERNEL);
+
+	kctx->mem_attrs = (ASn_MEMATTR_IMPL_DEF_CACHE_POLICY <<
+			   (ASn_MEMATTR_INDEX_IMPL_DEF_CACHE_POLICY * 8)) |
+			  (ASn_MEMATTR_FORCE_TO_CACHE_ALL    <<
+			   (ASn_MEMATTR_INDEX_FORCE_TO_CACHE_ALL * 8)) |
+			  (ASn_MEMATTR_WRITE_ALLOC           <<
+			   (ASn_MEMATTR_INDEX_WRITE_ALLOC * 8)) |
+			  0; /* The other indices are unused for now */
 
 	if (NULL == kctx->mmu_teardown_pages)
 		return MALI_ERROR_OUT_OF_MEMORY;

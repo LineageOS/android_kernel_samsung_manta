@@ -169,8 +169,8 @@ ifeq ($(CONFIG_MALI_PLATFORM_FAKE),y)
 		platform/vexpress/mali_kbase_cpu_vexpress.c
 	endif
 
-	ifeq ($(CONFIG_MALI_PLATFORM_RTSM_VE_AEMV8A),y)
-		SRC += platform/rtsm_ve_aemv8a/mali_kbase_config_vexpress.c
+	ifeq ($(CONFIG_MALI_PLATFORM_RTSM_VE),y)
+		SRC += platform/rtsm_ve/mali_kbase_config_vexpress.c
 	endif
 
 	ifeq ($(CONFIG_MALI_PLATFORM_JUNO),y)
@@ -219,8 +219,8 @@ ifeq ($(CONFIG_MALI_PLATFORM_FAKE),m)
 		platform/vexpress/mali_kbase_cpu_vexpress.c
 	endif
 
-	ifeq ($(CONFIG_MALI_PLATFORM_RTSM_VE_AEMV8A),y)
-		PSRC += platform/rtsm_ve_aemv8a/mali_kbase_config_vexpress.c
+	ifeq ($(CONFIG_MALI_PLATFORM_RTSM_VE),y)
+		PSRC += platform/rtsm_ve/mali_kbase_config_vexpress.c
 	endif
 
 	ifeq ($(CONFIG_MALI_PLATFORM_JUNO),y)

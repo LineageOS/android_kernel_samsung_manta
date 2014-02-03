@@ -196,7 +196,7 @@ static mali_error kbase_jd_umm_map(kbase_context *kctx, struct kbase_va_region *
 		size_t pages = PFN_UP(sg_dma_len(s));
 
 		WARN_ONCE(sg_dma_len(s) & (PAGE_SIZE-1),
-		"sg_dma_len(s)=%zu is not a multiple of PAGE_SIZE\n",
+		"sg_dma_len(s)=%u is not a multiple of PAGE_SIZE\n",
 		sg_dma_len(s));
 
 		WARN_ONCE(sg_dma_address(s) & (PAGE_SIZE-1),
@@ -216,6 +216,9 @@ static mali_error kbase_jd_umm_map(kbase_context *kctx, struct kbase_va_region *
 		err = MALI_ERROR_FUNCTION_FAILED;
 		goto out;
 	}
+
+	/* Update nents as we now have pages to map */
+	reg->alloc->nents = count;
 
 	err = kbase_mmu_insert_pages(kctx, reg->start_pfn, kbase_get_phy_pages(reg), kbase_reg_current_backed_size(reg), reg->flags | KBASE_REG_GPU_WR | KBASE_REG_GPU_RD);
 
@@ -238,6 +241,7 @@ static void kbase_jd_umm_unmap(kbase_context *kctx, struct kbase_va_region *reg,
 		kbase_mmu_teardown_pages(kctx, reg->start_pfn, kbase_reg_current_backed_size(reg));
 	dma_buf_unmap_attachment(reg->alloc->imported.umm.dma_attachment, reg->alloc->imported.umm.sgt, DMA_BIDIRECTIONAL);
 	reg->alloc->imported.umm.sgt = NULL;
+	reg->alloc->nents = 0;
 }
 #endif				/* CONFIG_DMA_SHARED_BUFFER */
 
@@ -564,7 +568,7 @@ STATIC INLINE void jd_resolve_dep(struct list_head *out_list, kbase_jd_atom *kat
 #ifdef CONFIG_KDS
 			if (dep_atom->kds_dep_satisfied)
 #endif
-				list_add(&dep_atom->dep_item[0], out_list);
+				list_add_tail(&dep_atom->dep_item[0], out_list);
 		}
 	}
 }
@@ -631,6 +635,9 @@ mali_bool jd_done_nolock(kbase_jd_atom *katom)
 		for (i = 0; i < 2; i++)
 			jd_resolve_dep(&runnable_jobs, katom, i);
 
+		if (katom->core_req & BASE_JD_REQ_EXTERNAL_RESOURCES)
+			kbase_jd_post_external_resources(katom);
+
 		while (!list_empty(&runnable_jobs)) {
 			kbase_jd_atom *node = list_entry(runnable_jobs.prev, kbase_jd_atom, dep_item[0]);
 			list_del(runnable_jobs.prev);
@@ -655,9 +662,6 @@ mali_bool jd_done_nolock(kbase_jd_atom *katom)
 			if (node->status == KBASE_JD_ATOM_STATE_COMPLETED)
 				list_add_tail(&node->dep_item[0], &completed_jobs);
 		}
-
-		if (katom->core_req & BASE_JD_REQ_EXTERNAL_RESOURCES)
-			kbase_jd_post_external_resources(katom);
 
 		kbase_event_post(kctx, katom);
 

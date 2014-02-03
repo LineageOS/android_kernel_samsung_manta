@@ -418,6 +418,51 @@ bad_type:
 			}
 			break;
 		}
+	case KBASE_FUNC_MEM_ALIAS: {
+			kbase_uk_mem_alias *alias = args;
+			struct base_mem_aliasing_info *__user user_ai;
+			struct base_mem_aliasing_info *ai;
+
+			if (sizeof(*alias) != args_size)
+				goto bad_size;
+
+			if (alias->nents > 4) {
+				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
+				break;
+			}
+
+#ifdef CONFIG_64BIT
+			if (is_compat_task())
+				user_ai = compat_ptr(alias->ai.compat_value);
+			else
+#endif
+				user_ai = alias->ai.value;
+
+			ai = kmalloc(GFP_KERNEL, sizeof(*ai) * alias->nents);
+			if (!ai) {
+				ukh->ret = MALI_ERROR_OUT_OF_MEMORY;
+				break;
+			}
+
+			if (copy_from_user(ai, user_ai,
+					   sizeof(*ai) * alias->nents)) {
+				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
+				goto copy_failed;
+			}
+
+			alias->gpu_va = kbase_mem_alias(kctx, &alias->flags,
+							alias->stride,
+							alias->nents, ai,
+							&alias->va_pages);
+			if (!alias->gpu_va) {
+				ukh->ret = MALI_ERROR_FUNCTION_FAILED;
+				goto no_alias;
+			}
+no_alias:
+copy_failed:
+			kfree(ai);
+			break;
+		}
 	case KBASE_FUNC_MEM_COMMIT:
 		{
 			kbase_uk_mem_commit *commit = args;
@@ -1844,26 +1889,37 @@ static ssize_t set_js_timeouts(struct device *dev, struct device_attribute *attr
 	struct kbase_device *kbdev;
 	int items;
 	unsigned long js_soft_stop_ms;
+	unsigned long js_soft_stop_ms_cl;
 	unsigned long js_hard_stop_ms_ss;
+	unsigned long js_hard_stop_ms_cl;
 	unsigned long js_hard_stop_ms_nss;
 	unsigned long js_reset_ms_ss;
+	unsigned long js_reset_ms_cl;
 	unsigned long js_reset_ms_nss;
 
 	kbdev = to_kbase_device(dev);
 	if (!kbdev)
 		return -ENODEV;
 
-	items = sscanf(buf, "%lu %lu %lu %lu %lu", &js_soft_stop_ms, &js_hard_stop_ms_ss, &js_hard_stop_ms_nss, &js_reset_ms_ss, &js_reset_ms_nss);
-	if (items == 5) {
+	items = sscanf(buf, "%lu %lu %lu %lu %lu %lu %lu %lu", &js_soft_stop_ms, &js_soft_stop_ms_cl, &js_hard_stop_ms_ss, &js_hard_stop_ms_cl, &js_hard_stop_ms_nss, &js_reset_ms_ss, &js_reset_ms_cl, &js_reset_ms_nss);
+	if (items == 8) {
 		u64 ticks;
 
 		ticks = js_soft_stop_ms * 1000000ULL;
 		do_div(ticks, kbdev->js_data.scheduling_tick_ns);
 		kbdev->js_soft_stop_ticks = ticks;
 
+		ticks = js_soft_stop_ms_cl * 1000000ULL;
+		do_div(ticks, kbdev->js_data.scheduling_tick_ns);
+		kbdev->js_soft_stop_ticks_cl = ticks;
+
 		ticks = js_hard_stop_ms_ss * 1000000ULL;
 		do_div(ticks, kbdev->js_data.scheduling_tick_ns);
 		kbdev->js_hard_stop_ticks_ss = ticks;
+
+		ticks = js_hard_stop_ms_cl * 1000000ULL;
+		do_div(ticks, kbdev->js_data.scheduling_tick_ns);
+		kbdev->js_hard_stop_ticks_cl = ticks;
 
 		ticks = js_hard_stop_ms_nss * 1000000ULL;
 		do_div(ticks, kbdev->js_data.scheduling_tick_ns);
@@ -1873,14 +1929,21 @@ static ssize_t set_js_timeouts(struct device *dev, struct device_attribute *attr
 		do_div(ticks, kbdev->js_data.scheduling_tick_ns);
 		kbdev->js_reset_ticks_ss = ticks;
 
+		ticks = js_reset_ms_cl * 1000000ULL;
+		do_div(ticks, kbdev->js_data.scheduling_tick_ns);
+		kbdev->js_reset_ticks_cl = ticks;
+
 		ticks = js_reset_ms_nss * 1000000ULL;
 		do_div(ticks, kbdev->js_data.scheduling_tick_ns);
 		kbdev->js_reset_ticks_nss = ticks;
 
 		dev_info(kbdev->osdev.dev, "Overriding KBASE_CONFIG_ATTR_JS_SOFT_STOP_TICKS with %lu ticks (%lu ms)\n", (unsigned long)kbdev->js_soft_stop_ticks, js_soft_stop_ms);
+		dev_info(kbdev->osdev.dev, "Overriding KBASE_CONFIG_ATTR_JS_SOFT_STOP_TICKS_CL with %lu ticks (%lu ms)\n", (unsigned long)kbdev->js_soft_stop_ticks_cl, js_soft_stop_ms_cl);
 		dev_info(kbdev->osdev.dev, "Overriding KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_SS with %lu ticks (%lu ms)\n", (unsigned long)kbdev->js_hard_stop_ticks_ss, js_hard_stop_ms_ss);
+		dev_info(kbdev->osdev.dev, "Overriding KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_CL with %lu ticks (%lu ms)\n", (unsigned long)kbdev->js_hard_stop_ticks_cl, js_hard_stop_ms_cl);
 		dev_info(kbdev->osdev.dev, "Overriding KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_NSS with %lu ticks (%lu ms)\n", (unsigned long)kbdev->js_hard_stop_ticks_nss, js_hard_stop_ms_nss);
 		dev_info(kbdev->osdev.dev, "Overriding KBASE_CONFIG_ATTR_JS_RESET_TICKS_SS with %lu ticks (%lu ms)\n", (unsigned long)kbdev->js_reset_ticks_ss, js_reset_ms_ss);
+		dev_info(kbdev->osdev.dev, "Overriding KBASE_CONFIG_ATTR_JS_RESET_TICKS_CL with %lu ticks (%lu ms)\n", (unsigned long)kbdev->js_reset_ticks_cl, js_reset_ms_cl);
 		dev_info(kbdev->osdev.dev, "Overriding KBASE_CONFIG_ATTR_JS_RESET_TICKS_NSS with %lu ticks (%lu ms)\n", (unsigned long)kbdev->js_reset_ticks_nss, js_reset_ms_nss);
 
 		return count;
@@ -1908,9 +1971,12 @@ static ssize_t show_js_timeouts(struct device *dev, struct device_attribute *att
 	ssize_t ret;
 	u64 ms;
 	unsigned long js_soft_stop_ms;
+	unsigned long js_soft_stop_ms_cl;
 	unsigned long js_hard_stop_ms_ss;
+	unsigned long js_hard_stop_ms_cl;
 	unsigned long js_hard_stop_ms_nss;
 	unsigned long js_reset_ms_ss;
+	unsigned long js_reset_ms_cl;
 	unsigned long js_reset_ms_nss;
 
 	kbdev = to_kbase_device(dev);
@@ -1921,9 +1987,17 @@ static ssize_t show_js_timeouts(struct device *dev, struct device_attribute *att
 	do_div(ms, 1000000UL);
 	js_soft_stop_ms = (unsigned long)ms;
 
+	ms = (u64) kbdev->js_soft_stop_ticks_cl * kbdev->js_data.scheduling_tick_ns;
+	do_div(ms, 1000000UL);
+	js_soft_stop_ms_cl = (unsigned long)ms;
+
 	ms = (u64) kbdev->js_hard_stop_ticks_ss * kbdev->js_data.scheduling_tick_ns;
 	do_div(ms, 1000000UL);
 	js_hard_stop_ms_ss = (unsigned long)ms;
+
+	ms = (u64) kbdev->js_hard_stop_ticks_cl * kbdev->js_data.scheduling_tick_ns;
+	do_div(ms, 1000000UL);
+	js_hard_stop_ms_cl = (unsigned long)ms;
 
 	ms = (u64) kbdev->js_hard_stop_ticks_nss * kbdev->js_data.scheduling_tick_ns;
 	do_div(ms, 1000000UL);
@@ -1933,11 +2007,15 @@ static ssize_t show_js_timeouts(struct device *dev, struct device_attribute *att
 	do_div(ms, 1000000UL);
 	js_reset_ms_ss = (unsigned long)ms;
 
+	ms = (u64) kbdev->js_reset_ticks_cl * kbdev->js_data.scheduling_tick_ns;
+	do_div(ms, 1000000UL);
+	js_reset_ms_cl = (unsigned long)ms;
+
 	ms = (u64) kbdev->js_reset_ticks_nss * kbdev->js_data.scheduling_tick_ns;
 	do_div(ms, 1000000UL);
 	js_reset_ms_nss = (unsigned long)ms;
 
-	ret = scnprintf(buf, PAGE_SIZE, "%lu %lu %lu %lu %lu\n", js_soft_stop_ms, js_hard_stop_ms_ss, js_hard_stop_ms_nss, js_reset_ms_ss, js_reset_ms_nss);
+	ret = scnprintf(buf, PAGE_SIZE, "%lu %lu %lu %lu %lu %lu %lu %lu\n", js_soft_stop_ms, js_soft_stop_ms_cl, js_hard_stop_ms_ss, js_hard_stop_ms_cl, js_hard_stop_ms_nss, js_reset_ms_ss, js_reset_ms_cl, js_reset_ms_nss);
 
 	if (ret >= PAGE_SIZE) {
 		buf[PAGE_SIZE - 2] = '\n';
@@ -1952,9 +2030,12 @@ static ssize_t show_js_timeouts(struct device *dev, struct device_attribute *att
  *
  * This is used to override the current job scheduler values for
  * KBASE_CONFIG_ATTR_JS_STOP_STOP_TICKS_SS
+ * KBASE_CONFIG_ATTR_JS_STOP_STOP_TICKS_CL
  * KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_SS
+ * KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_CL
  * KBASE_CONFIG_ATTR_JS_HARD_STOP_TICKS_NSS
  * KBASE_CONFIG_ATTR_JS_RESET_TICKS_SS
+ * KBASE_CONFIG_ATTR_JS_RESET_TICKS_CL
  * KBASE_CONFIG_ATTR_JS_RESET_TICKS_NSS.
  */
 DEVICE_ATTR(js_timeouts, S_IRUGO | S_IWUSR, show_js_timeouts, set_js_timeouts);
@@ -2181,7 +2262,6 @@ static int kbase_common_device_init(kbase_device *kbdev)
 		inited_pm_runtime_init = (1u << 8),
 #ifdef CONFIG_DEBUG_FS
 		inited_gpu_memory = (1u << 9),
-		inited_debugfs = (1u << 10),
 #endif /* CONFIG_DEBUG_FS */
 #ifdef CONFIG_MALI_DEBUG_SHADER_SPLIT_FS
 		inited_sc_split = (1u << 11),
@@ -2201,16 +2281,6 @@ static int kbase_common_device_init(kbase_device *kbdev)
 	osdev->mdev.parent = get_device(osdev->dev);
 
 	scnprintf(osdev->devname, DEVNAME_SIZE, "%s%d", kbase_drv_name, kbase_dev_nr++);
-
-#ifdef CONFIG_DEBUG_FS
-	kbdev->mali_debugfs_directory = debugfs_create_dir("mali", NULL);
-	if (NULL == kbdev->mali_debugfs_directory) {
-		dev_err(osdev->dev, "Couldn't create mali debugfs directory\n");
-		goto out_partial;
-	}
-	inited |= inited_debugfs;
-#endif /* CONFIG_DEBUG_FS */
-
 
 	if (misc_register(&osdev->mdev)) {
 		dev_err(osdev->dev, "Couldn't register misc dev %s\n", osdev->devname);
@@ -2364,8 +2434,6 @@ static int kbase_common_device_init(kbase_device *kbdev)
 #ifdef CONFIG_DEBUG_FS
 	if (inited & inited_gpu_memory)
 		kbasep_gpu_memory_debugfs_term(kbdev);
-	if (inited & inited_debugfs)
-		debugfs_remove(kbdev->mali_debugfs_directory);
 #endif /* CONFIG_DEBUG_FS */
 
 #ifdef CONFIG_MALI_DEBUG_SHADER_SPLIT_FS
@@ -2529,14 +2597,19 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 	if (err)
 		goto out_free_dev;
 
+#ifdef CONFIG_DEBUG_FS
+	kbdev->mali_debugfs_directory = debugfs_create_dir("mali", NULL);
+	if (NULL == kbdev->mali_debugfs_directory) {
+		dev_err(osdev->dev, "Couldn't create mali debugfs directory\n");
+		goto out_reg_unmap;
+	}
+#endif /* CONFIG_DEBUG_FS */
+
 	if (MALI_ERROR_NONE != kbase_device_init(kbdev)) {
 		dev_err(&pdev->dev, "Can't initialize device\n");
 		err = -ENOMEM;
-		goto out_reg_unmap;
+		goto out_debugfs_remove;
 	}
-#ifdef CONFIG_UMP
-	kbdev->memdev.ump_device_id = kbasep_get_config_value(kbdev, platform_data, KBASE_CONFIG_ATTR_UMP_DEVICE);
-#endif /* CONFIG_UMP */
 
 	/* obtain min/max configured gpu frequencies */
 	core_props = &(kbdev->gpu_props.props.core_props);
@@ -2551,17 +2624,21 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 	}
 	return 0;
 
- out_term_dev:
+out_term_dev:
 	kbase_device_term(kbdev);
- out_reg_unmap:
+out_debugfs_remove:
+#ifdef CONFIG_DEBUG_FS
+	debugfs_remove(kbdev->mali_debugfs_directory);
+out_reg_unmap:
+#endif /* CONFIG_DEBUG_FS */
 	kbase_common_reg_unmap(kbdev);
- out_free_dev:
+out_free_dev:
 #ifdef CONFIG_MALI_NO_MALI
 	midg_device_destroy(kbdev);
- out_midg:
+out_midg:
 #endif /* CONFIG_MALI_NO_MALI */
 	kbase_device_free(kbdev);
- out:
+out:
 	return err;
 }
 
@@ -2588,8 +2665,7 @@ static int kbase_common_device_remove(struct kbase_device *kbdev)
 #endif /* MALI_CUSTOMER_RELEASE */
 #ifdef CONFIG_DEBUG_FS
 	kbasep_gpu_memory_debugfs_term(kbdev);
-	debugfs_remove(kbdev->mali_debugfs_directory);
-#endif /* CONFIG_DEBUG_FS */
+#endif
 
 #ifdef CONFIG_MALI_DEBUG_SHADER_SPLIT_FS
 	device_remove_file(kbdev->osdev.dev, &dev_attr_sc_split);
@@ -2615,6 +2691,9 @@ static int kbase_common_device_remove(struct kbase_device *kbdev)
 	put_device(kbdev->osdev.dev);
 	kbase_common_reg_unmap(kbdev);
 	kbase_device_term(kbdev);
+#ifdef CONFIG_DEBUG_FS
+	debugfs_remove(kbdev->mali_debugfs_directory);
+#endif /* CONFIG_DEBUG_FS */
 #ifdef CONFIG_MALI_NO_MALI
 	midg_device_destroy(kbdev);
 #endif /* CONFIG_MALI_NO_MALI */
