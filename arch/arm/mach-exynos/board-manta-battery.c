@@ -342,6 +342,9 @@ detect_charge_source(enum charge_connector conn, bool online,
 
 	manta_bat_dock = false;
 
+	if (conn == CHARGE_CONNECTOR_USB)
+		manta_bat_apsd_results.intval = -1;
+
 	if (!online) {
 		if (conn == CHARGE_CONNECTOR_POGO)
 			manta_pogo_set_vbus(online, NULL);
@@ -381,8 +384,10 @@ static int update_charging_status(bool usb_connected, bool pogo_connected,
 					     usb_connected, false,
 					     usbin_redetect);
 		usb_conn_src_usb =
-			manta_bat_charge_source[CHARGE_CONNECTOR_USB] ==
-			MANTA_CHARGE_SOURCE_USB;
+			manta_bat_apsd_results.intval ==
+			POWER_SUPPLY_TYPE_USB ||
+			manta_bat_apsd_results.intval ==
+			POWER_SUPPLY_TYPE_USB_CDP;
 
 		/*
 		 * If USB disconnected, cancel any pending USB charger
