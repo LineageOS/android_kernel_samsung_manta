@@ -1093,7 +1093,7 @@ static int kbase_trace_buffer_mmap(kbase_context *kctx, struct vm_area_struct *v
 	*reg = new_reg;
 
 	/* map read only, noexec */
-	vma->vm_flags &= ~(VM_WRITE | VM_EXEC);
+	vma->vm_flags &= ~(VM_WRITE | VM_MAYWRITE | VM_EXEC | VM_MAYEXEC);
 	/* the rest of the flags is added by the cpu_mmap handler */
 
 	pr_debug("%s done\n", __func__);
@@ -1193,6 +1193,9 @@ int kbase_mmap(struct file *file, struct vm_area_struct *vma)
 
 	pr_debug("kbase_mmap\n");
 	nr_pages = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
+
+	/* strip away corresponding VM_MAY% flags to the VM_% flags requested */
+	vma->vm_flags &= ~((vma->vm_flags & (VM_READ | VM_WRITE)) << 4);
 
 	if (0 == nr_pages) {
 		err = -EINVAL;
@@ -1474,7 +1477,7 @@ static int kbase_tracking_page_setup(struct kbase_context * kctx, struct vm_area
 	spin_unlock(&kctx->mm_update_lock);
 
 	/* no real access */
-	vma->vm_flags &= ~(VM_READ | VM_WRITE | VM_EXEC);
+	vma->vm_flags &= ~(VM_READ | VM_MAYREAD | VM_WRITE | VM_MAYWRITE | VM_EXEC | VM_MAYEXEC);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0))
 	vma->vm_flags |= VM_DONTCOPY | VM_DONTEXPAND | VM_DONTDUMP | VM_IO;
 #else
