@@ -194,10 +194,6 @@ int kbase_pm_get_dvfs_utilisation(kbase_device *kbdev)
 	utilisation = (100 * kbdev->pm.metrics.time_busy) / (kbdev->pm.metrics.time_idle + kbdev->pm.metrics.time_busy);
 
  out:
-
-	kbdev->pm.metrics.time_idle = 0;
-	kbdev->pm.metrics.time_busy = 0;
-
 	return utilisation;
 }
 
