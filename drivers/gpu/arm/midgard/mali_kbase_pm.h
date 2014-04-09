@@ -869,6 +869,23 @@ void kbase_pm_get_dvfs_utilisation(struct kbase_device *kbdev,
 void kbase_pm_reset_dvfs_utilisation(struct kbase_device *kbdev);
 #endif
 
+/**
+ * Mali GPU Busy notifier
+ * Register/Unregister functions for Blocking notifier call
+ * chain to notify when GPU transitions state.
+ *
+ * @param nb           The notifier block that will be called by
+ *                     GPU Busy notifier chain.
+ * @retval 0           Successful registration
+ */
+
+int gpu_busy_register_notifier(struct notifier_block *nb);
+int gpu_busy_unregister_notifier(struct notifier_block *nb);
+
+/* Arguments passed to the notifier block by GPU Busy Notifier callchain */
+#define GPU_BUSY 1
+#define GPU_IDLE 0
+
 #ifdef CONFIG_MALI_MIDGARD_DVFS
 
 /**
