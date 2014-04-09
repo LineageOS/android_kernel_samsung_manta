@@ -37,6 +37,20 @@
    Exceeding this will cause overflow */
 #define KBASE_PM_TIME_SHIFT			8
 
+static BLOCKING_NOTIFIER_HEAD(gpu_busy_list);
+
+int gpu_busy_register_notifier(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_register(
+		&gpu_busy_list, nb);
+}
+
+int gpu_busy_unregister_notifier(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_unregister(
+		&gpu_busy_list, nb);
+}
+
 static enum hrtimer_restart dvfs_callback(struct hrtimer *timer)
 {
 	unsigned long flags;
@@ -125,6 +139,9 @@ void kbasep_pm_record_gpu_idle(kbase_device *kbdev)
 	kbdev->pm.metrics.time_period_start = now;
 
 	spin_unlock_irqrestore(&kbdev->pm.metrics.lock, flags);
+
+	blocking_notifier_call_chain(&gpu_busy_list,
+		GPU_IDLE, NULL);
 }
 
 KBASE_EXPORT_TEST_API(kbasep_pm_record_gpu_idle)
@@ -150,6 +167,9 @@ void kbasep_pm_record_gpu_active(kbase_device *kbdev)
 	kbdev->pm.metrics.time_period_start = now;
 
 	spin_unlock_irqrestore(&kbdev->pm.metrics.lock, flags);
+
+	blocking_notifier_call_chain(&gpu_busy_list,
+		GPU_BUSY, NULL);
 }
 
 KBASE_EXPORT_TEST_API(kbasep_pm_record_gpu_active)
