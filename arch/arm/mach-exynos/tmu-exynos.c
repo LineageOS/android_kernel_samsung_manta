@@ -71,7 +71,7 @@ static void set_refresh_period(unsigned int freq_ref,
 		auto_refresh, 0);
 #else
 	__raw_writel(auto_refresh, S5P_VA_DREXII +
-			EXYNOS_DMC_TIMING_AREF_OFFSET);
+			EXYNOS_DMC_TIMINGAREF_OFFSET);
 #endif
 }
 
