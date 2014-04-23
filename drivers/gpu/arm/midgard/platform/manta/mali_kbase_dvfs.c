@@ -1,14 +1,19 @@
-/* drivers/gpu/midgard/platform/manta/mali_kbase_dvfs.c
+/*
  *
- * Copyright 2011 by S.LSI. Samsung Electronics Inc.
- * San#24, Nongseo-Dong, Giheung-Gu, Yongin, Korea
+ * (C) COPYRIGHT ARM Limited. All rights reserved.
  *
- * Samsung SoC Mali-T604 DVFS driver
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software FoundatIon.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
+ *
  */
+
+
 
 /**
  * @file mali_kbase_dvfs.c
@@ -405,8 +410,12 @@ int kbase_platform_dvfs_enable(bool enable, int freq)
 
 	if (enable != kbdev->pm.metrics.timer_active) {
 		if (enable) {
-			kbasep_pm_metrics_init(kbdev);
-
+			spin_lock_irqsave(&kbdev->pm.metrics.lock, flags);
+			kbdev->pm.metrics.timer_active = MALI_TRUE;
+			spin_unlock_irqrestore(&kbdev->pm.metrics.lock, flags);
+			hrtimer_start(&kbdev->pm.metrics.timer,
+					HR_TIMER_DELAY_MSEC(KBASE_PM_DVFS_FREQUENCY),
+					HRTIMER_MODE_REL);
 			f = mali_dvfs_infotbl[dvfs_status->step].mem_freq;
 			exynos5_bus_mif_update(mem_freq_req, f);
 			ret = cpufreq_register_notifier(&mali_cpufreq_notifier_block,
@@ -420,8 +429,10 @@ int kbase_platform_dvfs_enable(bool enable, int freq)
 				printk(KERN_ERR "%s: cannot register GPU busy notifier\n",
 					__func__);
 		} else {
-			kbasep_pm_metrics_term(kbdev);
-
+			spin_lock_irqsave(&kbdev->pm.metrics.lock, flags);
+			kbdev->pm.metrics.timer_active = MALI_FALSE;
+			spin_unlock_irqrestore(&kbdev->pm.metrics.lock, flags);
+			hrtimer_cancel(&kbdev->pm.metrics.timer);
 			exynos5_bus_mif_update(mem_freq_req, 0);
 			for_each_online_cpu(cpu)
 				cpufreq_update_policy(cpu);
@@ -451,7 +462,7 @@ int kbase_platform_dvfs_enable(bool enable, int freq)
 
 		kbase_platform_dvfs_set_level(dvfs_status->kbdev, dvfs_status->step);
  	}
-
+ 
 	mutex_unlock(&mali_enable_clock_lock);
 
 	return MALI_TRUE;
@@ -718,9 +729,9 @@ void kbase_platform_dvfs_set_clock(kbase_device *kbdev, int freq)
 		panic("oops");
 
 	if (mout_gpll == NULL) {
-		mout_gpll = clk_get(kbdev->dev, "mout_gpll");
-		fin_gpll = clk_get(kbdev->dev, "ext_xtal");
-		fout_gpll = clk_get(kbdev->dev, "fout_gpll");
+		mout_gpll = clk_get(kbdev->osdev.dev, "mout_gpll");
+		fin_gpll = clk_get(kbdev->osdev.dev, "ext_xtal");
+		fout_gpll = clk_get(kbdev->osdev.dev, "fout_gpll");
 		if (IS_ERR(mout_gpll) || IS_ERR(fin_gpll) || IS_ERR(fout_gpll))
 			panic("clk_get ERROR");
 	}

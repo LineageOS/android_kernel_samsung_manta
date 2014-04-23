@@ -20,6 +20,7 @@
 #include <linux/errno.h>
 #include <linux/export.h>
 #include <linux/ioport.h>
+#include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/string.h>
 
@@ -53,7 +54,7 @@ static struct platform_device *mali_device;
 static void kbasep_config_parse_io_resources(const kbase_io_resources *io_resources, struct resource *const linux_resources)
 {
 	if (!io_resources || !linux_resources) {
-		pr_err("%s: couldn't find proper resources\n", __func__);
+		printk(KERN_ERR "%s: couldn't find proper resources\n", __func__);
 		return;
 	}
 
@@ -86,7 +87,7 @@ int kbase_platform_fake_register(void)
 	config = kbase_get_platform_config(); /* declared in midgard/mali_kbase_config.h but defined in platform folder */
 	if (config == NULL)
 	{
-		pr_err("%s: couldn't get platform config\n", __func__);
+		printk(KERN_ERR "%s: couldn't get platform config\n", __func__);
 		return -ENODEV;
 	}
 
@@ -125,7 +126,6 @@ int kbase_platform_fake_register(void)
 		return err;
 	}
 #endif /* CONFIG_CONFIG_MACH_MANTA */
-
 	return 0;
 }
 
@@ -135,8 +135,16 @@ void kbase_platform_fake_unregister(void)
 		platform_device_unregister(mali_device);
 }
 
+#ifdef MALI_PLATFORM_FAKE_MODULE
+module_init(kbase_platform_fake_register);
+module_exit(kbase_platform_fake_unregister);
+
+MODULE_LICENSE("GPL");
+MODULE_VERSION("mali_kbase_platform_fake");
+#else
 EXPORT_SYMBOL(kbase_platform_fake_register);
 EXPORT_SYMBOL(kbase_platform_fake_unregister);
+#endif
 
 #endif /* CONFIG_MALI_PLATFORM_FAKE */
 

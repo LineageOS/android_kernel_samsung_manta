@@ -1,14 +1,19 @@
 /*
  *
- * (C) COPYRIGHT 2011 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
+
+
 
 #include <linux/ioport.h>
 #include <linux/clk.h>
@@ -97,7 +102,7 @@ void kbase_platform_exynos5_term(kbase_device *kbdev)
 {
 	unregister_pm_notifier(&mali_pm_nb);
 #ifdef CONFIG_MALI_MIDGARD_DEBUG_SYS
-	kbase_platform_remove_sysfs_file(kbdev->dev);
+	kbase_platform_remove_sysfs_file(kbdev->osdev.dev);
 #endif				/* CONFIG_MALI_MIDGARD_DEBUG_SYS */
 	kbase_platform_term(kbdev);
 }
@@ -112,21 +117,22 @@ static int pm_callback_power_on(kbase_device *kbdev)
 {
 	int result;
 	int ret_val;
+	struct kbase_os_device *osdev = &kbdev->osdev;
 	struct exynos_context *platform;
 
 	platform = (struct exynos_context *)kbdev->platform_context;
 
-	if (pm_runtime_status_suspended(kbdev->dev))
+	if (pm_runtime_status_suspended(osdev->dev))
 		ret_val = 1;
 	else
 		ret_val = 0;
 
-	if(kbdev->dev->power.disable_depth > 0) {
+	if(osdev->dev->power.disable_depth > 0) {
 		if(platform->cmu_pmu_status == 0)
 			kbase_platform_cmu_pmu_control(kbdev, 1);
 		return ret_val;
 	}
-	result = pm_runtime_resume(kbdev->dev);
+	result = pm_runtime_resume(osdev->dev);
 
 	if (result < 0 && result == -EAGAIN)
 		kbase_platform_cmu_pmu_control(kbdev, 1);
@@ -138,15 +144,16 @@ static int pm_callback_power_on(kbase_device *kbdev)
 
 static void pm_callback_power_off(kbase_device *kbdev)
 {
-	pm_schedule_suspend(kbdev->dev, RUNTIME_PM_DELAY_TIME);
+	struct kbase_os_device *osdev = &kbdev->osdev;
+	pm_schedule_suspend(osdev->dev, RUNTIME_PM_DELAY_TIME);
 }
 
 mali_error kbase_device_runtime_init(struct kbase_device *kbdev)
 {
-	pm_suspend_ignore_children(kbdev->dev, true);
-	pm_runtime_enable(kbdev->dev);
+	pm_suspend_ignore_children(kbdev->osdev.dev, true);
+	pm_runtime_enable(kbdev->osdev.dev);
 #ifdef CONFIG_MALI_MIDGARD_DEBUG_SYS
-	if (kbase_platform_create_sysfs_file(kbdev->dev))
+	if (kbase_platform_create_sysfs_file(kbdev->osdev.dev))
 		return MALI_ERROR_FUNCTION_FAILED;
 #endif				/* CONFIG_MALI_MIDGARD_DEBUG_SYS */
 	return MALI_ERROR_NONE;
@@ -154,7 +161,7 @@ mali_error kbase_device_runtime_init(struct kbase_device *kbdev)
 
 void kbase_device_runtime_disable(struct kbase_device *kbdev)
 {
-	pm_runtime_disable(kbdev->dev);
+	pm_runtime_disable(kbdev->osdev.dev);
 }
 
 static int pm_callback_runtime_on(kbase_device *kbdev)
