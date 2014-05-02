@@ -52,5 +52,5 @@ void kbase_platform_term(kbase_device *kbdev);
 
 int kbase_platform_clock_on(struct kbase_device *kbdev);
 int kbase_platform_clock_off(struct kbase_device *kbdev);
-
+extern int kbase_platform_gpu_busy_init(void);
 #endif				/* _KBASE_PLATFORM_H_ */

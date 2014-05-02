@@ -1018,6 +1018,7 @@ mali_error kbase_platform_init(struct kbase_device *kbdev)
 #ifdef CONFIG_MALI_MIDGARD_DVFS
 	kbase_platform_dvfs_init(kbdev);
 #endif				/* CONFIG_MALI_MIDGARD_DVFS */
+	kbase_platform_gpu_busy_init();
 
 	/* Enable power */
 	kbase_platform_cmu_pmu_control(kbdev, 1);
