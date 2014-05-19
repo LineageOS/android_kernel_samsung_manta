@@ -870,4 +870,9 @@ typedef enum kbase_share_attr_bits {
 /* Maximum number of times a job can be replayed */
 #define BASEP_JD_REPLAY_LIMIT 15
 
+/*Notifier constant to indicate a new compute work is scheduled on GPU*/
+#define COMPUTE_JOB_SCHEDULED 1
+/*Notifier constant to indicate that a compute job has finished processing on GPU*/
+#define COMPUTE_JOB_DONE 2
+
 #endif				/* _KBASE_DEFS_H_ */
