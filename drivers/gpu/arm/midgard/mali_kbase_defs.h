@@ -801,4 +801,9 @@ typedef enum kbase_share_attr_bits {
 /* Maximum number of loops polling the GPU for an AS flush to complete before we assume the GPU has hung */
 #define KBASE_AS_FLUSH_MAX_LOOPS        100000
 
+/*Notifier constant to indicate a new compute work is scheduled on GPU*/
+#define COMPUTE_JOB_SCHEDULED 1
+/*Notifier constant to indicate that a compute job has finished processing on GPU*/
+#define COMPUTE_JOB_DONE 2
+
 #endif				/* _KBASE_DEFS_H_ */
