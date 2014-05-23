@@ -36,9 +36,6 @@ struct exynos_context {
 	u32 time_busy;
 	u32 time_idle;
 	bool dvfs_enabled;
-	/* To track the number of elapsed gpu ticks since GPU
-	 * woke up from suspend */
-	int gpu_up;
 #endif
 };
 

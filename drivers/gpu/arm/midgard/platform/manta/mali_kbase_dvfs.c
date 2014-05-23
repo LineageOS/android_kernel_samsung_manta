@@ -21,7 +21,6 @@
  */
 
 #include <mali_kbase.h>
-#include <mali_kbase_pm.h>
 #include <mali_kbase_uku.h>
 #include <mali_kbase_mem.h>
 #include <mali_midg_regmap.h>
@@ -41,7 +40,6 @@
 #include <linux/uaccess.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
-#include <linux/cpufreq.h>
 
 #include <mach/map.h>
 #include <linux/fb.h>
@@ -86,27 +84,16 @@ typedef struct _mali_dvfs_info {
 	int max_threshold;
 	unsigned long long time;
 	int mem_freq;
-/**
- * gpu_util - Threshold gpu util to floor the cpu_freq.
- * The GPU operating does not change on every utilization event.
- * So, the GPU Util can be much lower than the minimum threshold
- * for a few dvfs ticks (e.g. simple UI workloads) before dvfs
- * actually decides to lower down the GPU frequency. In those
- * cases we can disable the cpufreq-flooring when the utilisation
- * is below this value.
- */
-	unsigned int gpu_util;
-	unsigned int cpu_min_freq;
 } mali_dvfs_info;
 
 static mali_dvfs_info mali_dvfs_infotbl[] = {
-	{925000, 100, 0, 70, 0, 100000, 0, 0},
-	{925000, 160, 50, 65, 0, 160000, 0, 0},
-	{1025000, 266, 60, 78, 0, 400000, 0, 0},
-	{1075000, 350, 70, 80, 0, 400000, 0, 0},
-	{1125000, 400, 70, 80, 0, 667000, 30, 1000000},
-	{1150000, 450, 76, 99, 0, 800000, 30, 1000000},
-	{1200000, 533, 99, 100, 0, 800000, 30, 1000000},
+	{925000, 100, 0, 70, 0, 100000},
+	{925000, 160, 50, 65, 0, 160000},
+	{1025000, 266, 60, 78, 0, 400000},
+	{1075000, 350, 70, 80, 0, 400000},
+	{1125000, 400, 70, 80, 0, 667000},
+	{1150000, 450, 76, 99, 0, 800000},
+	{1200000, 533, 99, 100, 0, 800000},
 };
 
 #define MALI_DVFS_STEP	ARRAY_SIZE(mali_dvfs_infotbl)
@@ -116,7 +103,6 @@ typedef struct _mali_dvfs_status_type {
 	kbase_device *kbdev;
 	int step;
 	int utilisation;
-	unsigned int cpu_min_freq;
 #ifdef CONFIG_MALI_MIDGARD_FREQ_LOCK
 	int upper_lock;
 	int under_lock;
@@ -139,8 +125,6 @@ static void update_time_in_state(int level);
 static mali_dvfs_status mali_dvfs_status_current;
 #ifdef MALI_DVFS_ASV_ENABLE
 static const unsigned int mali_dvfs_vol_default[] = { 925000, 925000, 1025000, 1075000, 1125000, 1150000, 1200000 };
-
-static int kbase_platform_dvfs_get_ticks_elapsed(void);
 
 static int mali_dvfs_update_asv(int cmd)
 {
@@ -229,7 +213,6 @@ int kbase_platform_dvfs_event(struct kbase_device *kbdev, u32 utilisation)
 	platform = (struct exynos_context *)kbdev->platform_context;
 
 	spin_lock_irqsave(&mali_dvfs_spinlock, flags);
-	platform->gpu_up++;
 	if (platform->time_tick < MALI_DVFS_TIME_INTERVAL) {
 		platform->time_tick++;
 		platform->time_busy += kbdev->pm.metrics.time_busy;
@@ -250,33 +233,6 @@ int kbase_platform_dvfs_event(struct kbase_device *kbdev, u32 utilisation)
 	/*add error handle here */
 	return MALI_TRUE;
 }
-
-#ifdef CONFIG_MALI_MIDGARD_DVFS
-static int kbase_platform_dvfs_get_ticks_elapsed(void)
-{
-	mali_dvfs_status *dvfs_status;
-	struct kbase_device *kbdev;
-	struct exynos_context *platform;
-	int gpu_ticks_elapsed;
-	unsigned long flags;
-
-	dvfs_status = &mali_dvfs_status_current;
-	kbdev = mali_dvfs_status_current.kbdev;
-
-	if (kbdev == NULL) {
-		printk(KERN_ERR "%s: mali dvfs status object not initialised",
-				__func__);
-		return 0;
-	}
-
-	platform = (struct exynos_context *)kbdev->platform_context;
-	spin_lock_irqsave(&mali_dvfs_spinlock, flags);
-	gpu_ticks_elapsed = platform->gpu_up;
-	spin_unlock_irqrestore(&mali_dvfs_spinlock, flags);
-
-	return gpu_ticks_elapsed;
-}
-#endif
 
 int kbase_platform_dvfs_get_utilisation(void)
 {
@@ -304,101 +260,13 @@ int kbase_platform_dvfs_get_enable_status(void)
 	return enable;
 }
 
-static int mali_gpu_busy_notifier(struct notifier_block *nb,
-				unsigned long event, void *data)
-{
-	int level, cpu;
-	level = mali_get_dvfs_current_level();
-
-	if (mali_dvfs_infotbl[level].cpu_min_freq != 0) {
-		for_each_online_cpu(cpu)
-			cpufreq_update_policy(cpu);
-	}
-
-	return 0;
-}
-
-static struct notifier_block mali_gpu_busy_notifier_block = {
-	.notifier_call = mali_gpu_busy_notifier,
-};
-
-bool kbase_platform_dvfs_get_active_status(void)
-{
-	struct kbase_device *kbdev;
-	unsigned long flags;
-	bool active;
-
-	kbdev = mali_dvfs_status_current.kbdev;
-	spin_lock_irqsave(&kbdev->pm.metrics.lock, flags);
-	active = kbdev->pm.metrics.gpu_active;
-	spin_unlock_irqrestore(&kbdev->pm.metrics.lock, flags);
-
-	return active;
-}
-
-static bool kbase_cpufreq_needs_flooring(int level)
-{
-	int gpu_busy, status, uptime;
-
-	status = kbase_platform_dvfs_get_enable_status();
-	gpu_busy = kbase_platform_dvfs_get_utilisation();
-	uptime = kbase_platform_dvfs_get_ticks_elapsed();
-
-/**
- * Setting KBASE_PM_DVFS_FREQUENCY <= RUNTIME_PM_DELAY_TIME generally
- * gives mali_dvfs_event_proc time to fire at least once, even when
- * the workload is very light (e.g. <1ms work for icon updates),
- * but we then disable the GPU clocks very soon afterwards. In that
- * case we don't want to floor the cpufreq, so we wait for at least
- * 2*KBASE_PM_DVFS_EFFECIENCY which indicates we have a much frequent
- * workload.
- */
-	if (status == 1 && uptime > 1 &&
-		gpu_busy >= mali_dvfs_infotbl[level].gpu_util)
-		return TRUE;
-	else
-		return FALSE;
-}
-
-static int mali_cpufreq_notifier(struct notifier_block *nb,
-				unsigned long event, void *data)
-{
-	struct cpufreq_policy *policy = data;
-	int current_level;
-	bool active;
-
-	if (event != CPUFREQ_ADJUST)
-		return 0;
-
-	current_level = mali_get_dvfs_current_level();
-	active = kbase_platform_dvfs_get_active_status();
-
-	if (!active && kbase_cpufreq_needs_flooring(current_level)) {
-		cpufreq_verify_within_limits(policy,
-				mali_dvfs_infotbl[current_level].cpu_min_freq,
-				policy->cpuinfo.max_freq);
-		mali_dvfs_status_current.cpu_min_freq =
-				mali_dvfs_infotbl[current_level].cpu_min_freq;
-	} else {
-		cpufreq_verify_within_limits(policy,
-				0, policy->cpuinfo.max_freq);
-		mali_dvfs_status_current.cpu_min_freq = 0;
-	}
-
-	return 0;
-}
-
-static struct notifier_block mali_cpufreq_notifier_block = {
-	.notifier_call = mali_cpufreq_notifier,
-};
-
 int kbase_platform_dvfs_enable(bool enable, int freq)
 {
 	mali_dvfs_status *dvfs_status;
 	struct kbase_device *kbdev;
 	unsigned long flags;
 	struct exynos_context *platform;
-	int f, cpu, ret;
+	int f;
 
 	dvfs_status = &mali_dvfs_status_current;
 	kbdev = mali_dvfs_status_current.kbdev;
@@ -418,35 +286,12 @@ int kbase_platform_dvfs_enable(bool enable, int freq)
 					HRTIMER_MODE_REL);
 			f = mali_dvfs_infotbl[dvfs_status->step].mem_freq;
 			exynos5_bus_mif_update(mem_freq_req, f);
-			ret = cpufreq_register_notifier(&mali_cpufreq_notifier_block,
-					CPUFREQ_POLICY_NOTIFIER);
-			if (ret)
-				printk(KERN_ERR "%s: cannot register cpufreq notifier\n",
-					__func__);
-			ret = gpu_busy_register_notifier(&mali_gpu_busy_notifier_block);
-
-			if (ret)
-				printk(KERN_ERR "%s: cannot register GPU busy notifier\n",
-					__func__);
 		} else {
 			spin_lock_irqsave(&kbdev->pm.metrics.lock, flags);
 			kbdev->pm.metrics.timer_active = MALI_FALSE;
 			spin_unlock_irqrestore(&kbdev->pm.metrics.lock, flags);
 			hrtimer_cancel(&kbdev->pm.metrics.timer);
 			exynos5_bus_mif_update(mem_freq_req, 0);
-			for_each_online_cpu(cpu)
-				cpufreq_update_policy(cpu);
-			ret = cpufreq_unregister_notifier(&mali_cpufreq_notifier_block,
-					CPUFREQ_POLICY_NOTIFIER);
-			if (ret)
-				printk(KERN_ERR "%s: cannot unregister cpufreq notifier\n",
-					__func__);
-			ret = gpu_busy_unregister_notifier(&mali_gpu_busy_notifier_block);
-
-			if (ret)
-				printk(KERN_ERR "%s: cannot unregister GPU busy notifier\n",
-					__func__);
-
 		}
 	}
 
@@ -456,7 +301,6 @@ int kbase_platform_dvfs_enable(bool enable, int freq)
 		platform->time_busy = 0;
 		platform->time_idle = 0;
 		platform->utilisation = 0;
-		platform->gpu_up = 0;
 		dvfs_status->step = kbase_platform_dvfs_get_level(freq);
 		spin_unlock_irqrestore(&mali_dvfs_spinlock, flags);
 
@@ -826,10 +670,10 @@ int kbase_platform_dvfs_get_level(int freq)
 void kbase_platform_dvfs_set_level(kbase_device *kbdev, int level)
 {
 	static int prev_level = -1;
-	int f, cpu;
+	int f;
 
 	if (level == prev_level)
-		goto out;
+		return;
 
 	if (WARN_ON((level >= MALI_DVFS_STEP) || (level < 0)))
 		panic("invalid level");
@@ -855,7 +699,6 @@ void kbase_platform_dvfs_set_level(kbase_device *kbdev, int level)
 		kbase_platform_dvfs_set_vol(mali_dvfs_infotbl[level].voltage);
 		exynos5_bus_mif_update(mem_freq_req, f);
 	}
-
 #if defined(CONFIG_MALI_MIDGARD_DEBUG_SYS) && defined(CONFIG_MALI_MIDGARD_DVFS)
 	update_time_in_state(prev_level);
 #endif
@@ -863,17 +706,6 @@ void kbase_platform_dvfs_set_level(kbase_device *kbdev, int level)
 #ifdef CONFIG_MALI_MIDGARD_DVFS
 	mutex_unlock(&mali_set_clock_lock);
 #endif
-
-out:
-#ifdef CONFIG_MALI_MIDGARD_DVFS
-	if (mali_dvfs_status_current.cpu_min_freq !=
-		mali_dvfs_infotbl[level].cpu_min_freq &&
-		kbase_cpufreq_needs_flooring(level)) {
-			for_each_online_cpu(cpu)
-				cpufreq_update_policy(cpu);
-	}
-#endif
-	return;
 }
 
 int kbase_platform_dvfs_sprint_avs_table(char *buf)
