@@ -1,19 +1,14 @@
-/*
+/* drivers/gpu/midgard/platform/manta/mali_kbase_dvfs.h
  *
- * (C) COPYRIGHT ARM Limited. All rights reserved.
+ * Copyright 2011 by S.LSI. Samsung Electronics Inc.
+ * San#24, Nongseo-Dong, Giheung-Gu, Yongin, Korea
  *
- * This program is free software and is provided to you under the terms of the
- * GNU General Public License version 2 as published by the Free Software
- * Foundation, and any use by you of this program is subject to the terms
- * of such GNU licence.
+ * Samsung SoC Mali-T604 DVFS driver
  *
- * A copy of the licence is included with the program, and can also be obtained
- * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA  02110-1301, USA.
- *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software FoundatIon.
  */
-
-
 
 /**
  * @file mali_kbase_dvfs.h
