@@ -273,13 +273,19 @@ int kbase_platform_dvfs_enable(bool enable, int freq)
 
 	if (enable != kbdev->pm.metrics.timer_active) {
 		if (enable) {
-			kbasep_pm_metrics_init(kbdev);
-
+			spin_lock_irqsave(&kbdev->pm.metrics.lock, flags);
+			kbdev->pm.metrics.timer_active = MALI_TRUE;
+			spin_unlock_irqrestore(&kbdev->pm.metrics.lock, flags);
+			hrtimer_start(&kbdev->pm.metrics.timer,
+					HR_TIMER_DELAY_MSEC(KBASE_PM_DVFS_FREQUENCY),
+					HRTIMER_MODE_REL);
 			f = mali_dvfs_infotbl[dvfs_status->step].mem_freq;
 			exynos5_bus_mif_update(mem_freq_req, f);
 		} else {
-			kbasep_pm_metrics_term(kbdev);
-
+			spin_lock_irqsave(&kbdev->pm.metrics.lock, flags);
+			kbdev->pm.metrics.timer_active = MALI_FALSE;
+			spin_unlock_irqrestore(&kbdev->pm.metrics.lock, flags);
+			hrtimer_cancel(&kbdev->pm.metrics.timer);
 			exynos5_bus_mif_update(mem_freq_req, 0);
 		}
 	}
@@ -295,7 +301,7 @@ int kbase_platform_dvfs_enable(bool enable, int freq)
 
 		kbase_platform_dvfs_set_level(dvfs_status->kbdev, dvfs_status->step);
  	}
-
+ 
 	mutex_unlock(&mali_enable_clock_lock);
 
 	return MALI_TRUE;
