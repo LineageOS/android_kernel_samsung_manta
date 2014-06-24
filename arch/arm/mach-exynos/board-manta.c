@@ -17,7 +17,6 @@
 #include <linux/input.h>
 #include <linux/ion.h>
 #include <linux/i2c.h>
-#include <linux/keyreset.h>
 #include <linux/mmc/host.h>
 #include <linux/memblock.h>
 #include <linux/persistent_ram.h>
@@ -36,7 +35,6 @@
 #include <asm/hardware/gic.h>
 #include <asm/mach-types.h>
 #include <asm/system_info.h>
-#include <asm/system_misc.h>
 
 #include <plat/adc.h>
 #include <plat/clock.h>
@@ -70,7 +68,6 @@
 static int manta_hw_rev;
 phys_addr_t manta_bootloader_fb_start;
 phys_addr_t manta_bootloader_fb_size = 2560 * 1600 * 4;
-static bool manta_charger_mode;
 static void __iomem *manta_cpu0_debug;
 static void __iomem *manta_cpu1_debug;
 
@@ -85,14 +82,6 @@ static int __init s3cfb_bootloaderfb_arg(char *options)
 	return 0;
 }
 early_param("s3cfb.bootloaderfb", s3cfb_bootloaderfb_arg);
-
-static int __init manta_androidboot_mode_arg(char *options)
-{
-	if (!strcmp(options, "charger"))
-		manta_charger_mode = true;
-	return 0;
-}
-early_param("androidboot.mode", manta_androidboot_mode_arg);
 
 static struct gpio manta_hw_rev_gpios[] = {
 	{EXYNOS5_GPV1(4), GPIOF_IN, "hw_rev0"},
@@ -278,28 +267,6 @@ static void __init manta_gpio_power_init(void)
 
 	gpio_free(EXYNOS5_GPX2(7));
 }
-
-static int manta_keyreset_fn(void)
-{
-	arm_pm_restart('h', NULL);
-	return 1;
-}
-
-static struct keyreset_platform_data manta_reset_keys_pdata = {
-	.keys_down	= {
-		KEY_POWER,
-		0,
-	},
-	.down_time_ms	= 1500,
-	.reset_fn	= manta_keyreset_fn,
-};
-
-struct platform_device manta_keyreset_device = {
-	.name	= KEYRESET_NAME,
-	.dev	= {
-		.platform_data	= &manta_reset_keys_pdata,
-	},
-};
 
 static struct as3668_platform_data as3668_pdata = {
 	.led_array = {AS3668_RED, AS3668_GREEN, AS3668_BLUE, AS3668_WHITE},
@@ -834,9 +801,6 @@ static void __init manta_machine_init(void)
 
 	manta_sysmmu_init();
 	manta_dwmci_init();
-
-	if (manta_charger_mode)
-		platform_device_register(&manta_keyreset_device);
 
 	s3c_i2c0_set_platdata(&i2c0_data);
 	s3c_i2c1_set_platdata(NULL);
