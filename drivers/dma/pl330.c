@@ -395,6 +395,8 @@ struct pl330_req {
 	/* Pointer to first xfer in the request. */
 	struct pl330_xfer *x;
 	unsigned int infiniteloop;
+	/* Hook to attach to DMAC's list of reqs with due callback */
+	struct list_head rqd;
 };
 
 /*
@@ -464,8 +466,6 @@ struct _pl330_req {
 	/* Number of bytes taken to setup MC for the req */
 	u32 mc_len;
 	struct pl330_req *r;
-	/* Hook to attach to DMAC's list of reqs with due callback */
-	struct list_head rqd;
 };
 
 /* ToBeDone for tasklet */
@@ -1784,7 +1784,7 @@ static void pl330_dotask(unsigned long data)
 /* Returns 1 if state was updated, 0 otherwise */
 static int pl330_update(const struct pl330_info *pi)
 {
-	struct _pl330_req *rqdone;
+	struct pl330_req *rqdone, *tmp;
 	struct pl330_dmac *pl330;
 	unsigned long flags;
 	void __iomem *regs;
@@ -1851,8 +1851,10 @@ static int pl330_update(const struct pl330_info *pi)
 			if (active == -1) /* Aborted */
 				continue;
 
-			rqdone = &thrd->req[active];
-			if (!rqdone->r->infiniteloop) {
+			/* Detach the req */
+			rqdone = thrd->req[active].r;
+			if (!rqdone->infiniteloop) {
+				thrd->req[active].r = NULL;
 				mark_free(thrd, active);
 
 				/* Get going again ASAP */
@@ -1865,21 +1867,11 @@ static int pl330_update(const struct pl330_info *pi)
 	}
 
 	/* Now that we are in no hurry, do the callbacks */
-	while (!list_empty(&pl330->req_done)) {
-		struct pl330_req *r;
-
-		rqdone = container_of(pl330->req_done.next,
-					struct _pl330_req, rqd);
-
-		list_del_init(&rqdone->rqd);
-
-		/* Detach the req */
-		r = rqdone->r;
-		if (!r->infiniteloop)
-			rqdone->r = NULL;
+	list_for_each_entry_safe(rqdone, tmp, &pl330->req_done, rqd) {
+		list_del(&rqdone->rqd);
 
 		spin_unlock_irqrestore(&pl330->lock, flags);
-		_callback(r, PL330_ERR_NONE);
+		_callback(rqdone, PL330_ERR_NONE);
 		spin_lock_irqsave(&pl330->lock, flags);
 	}
 
