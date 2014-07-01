@@ -519,6 +519,7 @@ struct pl330_dmac {
 	struct _pl330_tbd	dmac_tbd;
 	/* State of DMAC operation */
 	enum pl330_dmac_state	state;
+	char                    nesting;
 };
 
 enum desc_status {
@@ -1798,6 +1799,7 @@ static int pl330_update(const struct pl330_info *pi)
 	pl330 = pi->pl330_data;
 
 	spin_lock_irqsave(&pl330->lock, flags);
+	pl330->nesting++;
 
 	val = readl(regs + FSM) & 0x1;
 	if (val)
@@ -1851,8 +1853,17 @@ static int pl330_update(const struct pl330_info *pi)
 			if (active == -1) /* Aborted */
 				continue;
 
+			BUG_ON(active >= ARRAY_SIZE(thrd->req));
 			/* Detach the req */
 			rqdone = thrd->req[active].r;
+			if (!rqdone) {
+				dev_err(pi->dev,
+		"empty rqdone nest=%d ev=%d id=%d val=%x inten=%x active=%d\n",
+					pl330->nesting, ev, id, (int)val,
+					(int)inten, active);
+				WARN_ON(1);
+				continue;
+			}
 			if (!rqdone->infiniteloop) {
 				thrd->req[active].r = NULL;
 				mark_free(thrd, active);
@@ -1876,6 +1887,7 @@ static int pl330_update(const struct pl330_info *pi)
 	}
 
 updt_exit:
+	pl330->nesting--;
 	spin_unlock_irqrestore(&pl330->lock, flags);
 
 	if (pl330->dmac_tbd.reset_dmac
