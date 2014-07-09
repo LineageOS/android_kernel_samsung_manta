@@ -10,6 +10,8 @@
  * published by the Free Software FoundatIon.
  */
 
+
+
 /**
  * @file mali_kbase_dvfs.h
  * DVFS
@@ -41,7 +43,7 @@ int kbase_platform_regulator_disable(void);
 int kbase_platform_regulator_enable(void);
 int kbase_platform_get_voltage(struct device *dev, int *vol);
 int kbase_platform_set_voltage(struct device *dev, int vol);
-void kbase_platform_dvfs_set_clock(kbase_device *kbdev, int freq);
+void kbase_platform_dvfs_set_clock(struct kbase_device *kbdev, int freq);
 int kbase_platform_dvfs_sprint_avs_table(char *buf);
 int kbase_platform_dvfs_set(int enable);
 void kbase_platform_dvfs_set_level(struct kbase_device *kbdev, int level);
@@ -50,7 +52,8 @@ int kbase_platform_dvfs_get_level(int freq);
 #ifdef CONFIG_MALI_MIDGARD_DVFS
 int kbase_platform_dvfs_init(struct kbase_device *dev);
 void kbase_platform_dvfs_term(void);
-int kbase_platform_dvfs_event(struct kbase_device *kbdev, u32 utilisation);
+int kbase_platform_dvfs_event(struct kbase_device *kbdev, u32 utilisation,
+		u32 util_gl_share, u32 util_cl_share[2]);
 int kbase_platform_dvfs_get_enable_status(void);
 int kbase_platform_dvfs_enable(bool enable, int freq);
 int kbase_platform_dvfs_get_utilisation(void);

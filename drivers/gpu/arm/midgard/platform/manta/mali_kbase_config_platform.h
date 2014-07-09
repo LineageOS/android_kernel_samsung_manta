@@ -15,11 +15,19 @@
 
 
 
-
-
-#ifndef _KBASE_10969_WORKAROUND_
-#define _KBASE_10969_WORKAROUND_
-
-int kbasep_10969_workaround_clamp_coordinates(struct kbase_jd_atom *katom);
-
-#endif /* _KBASE_10969_WORKAROUND_ */
+/**
+ * Maximum frequency GPU will be clocked at. Given in kHz.
+ * This must be specified as there is no default value.
+ *
+ * Attached value: number in kHz
+ * Default value: NA
+ */
+#define GPU_FREQ_KHZ_MAX 533000
+/**
+ * Minimum frequency GPU will be clocked at. Given in kHz.
+ * This must be specified as there is no default value.
+ *
+ * Attached value: number in kHz
+ * Default value: NA
+ */
+#define GPU_FREQ_KHZ_MIN 100000

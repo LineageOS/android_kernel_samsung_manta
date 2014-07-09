@@ -17,6 +17,8 @@
 
 
 
+
+
 /**
  * @file mali_kbase_sync.h
  *
@@ -25,7 +27,7 @@
 #ifndef MALI_KBASE_SYNC_H
 #define MALI_KBASE_SYNC_H
 
-#include <linux/sync.h>
+#include "sync.h"
 #include <malisw/mali_malisw.h>
 
 /*
