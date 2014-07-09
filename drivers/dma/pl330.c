@@ -1846,6 +1846,11 @@ static int pl330_update(const struct pl330_info *pi)
 			ret = 1;
 
 			id = pl330->events[ev];
+			if (id == -1) { /* Freed */
+				dev_err(pi->dev, "freed event nest=%d ev=%d\n",
+					pl330->nesting, ev);
+				continue;
+			}
 
 			thrd = &pl330->channels[id];
 
@@ -1861,7 +1866,6 @@ static int pl330_update(const struct pl330_info *pi)
 		"empty rqdone nest=%d ev=%d id=%d val=%x inten=%x active=%d\n",
 					pl330->nesting, ev, id, (int)val,
 					(int)inten, active);
-				WARN_ON(1);
 				continue;
 			}
 			if (!rqdone->infiniteloop) {
