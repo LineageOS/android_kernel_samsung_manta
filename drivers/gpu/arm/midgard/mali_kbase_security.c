@@ -17,6 +17,8 @@
 
 
 
+
+
 /**
  * @file mali_kbase_security.c
  * Base kernel security capability API
@@ -45,7 +47,7 @@ static inline mali_bool kbasep_am_i_root(void)
  * kbase_security_has_capability - see mali_kbase_caps.h for description.
  */
 
-mali_bool kbase_security_has_capability(kbase_context *kctx, kbase_security_capability cap, u32 flags)
+mali_bool kbase_security_has_capability(struct kbase_context *kctx, enum kbase_security_capability cap, u32 flags)
 {
 	/* Assume failure */
 	mali_bool access_allowed = MALI_FALSE;

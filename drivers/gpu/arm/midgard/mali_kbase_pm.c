@@ -17,6 +17,8 @@
 
 
 
+
+
 /**
  * @file mali_kbase_pm.c
  * Base kernel power management APIs
@@ -27,30 +29,32 @@
 
 #include <mali_kbase_pm.h>
 
-void kbase_pm_register_access_enable(kbase_device *kbdev)
-{
-	kbase_pm_callback_conf *callbacks;
+#if KBASE_PM_EN
 
-	callbacks = (kbase_pm_callback_conf *) kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_POWER_MANAGEMENT_CALLBACKS);
+void kbase_pm_register_access_enable(struct kbase_device *kbdev)
+{
+	struct kbase_pm_callback_conf *callbacks;
+
+	callbacks = (struct kbase_pm_callback_conf *)kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_POWER_MANAGEMENT_CALLBACKS);
 
 	if (callbacks)
 		callbacks->power_on_callback(kbdev);
 }
 
-void kbase_pm_register_access_disable(kbase_device *kbdev)
+void kbase_pm_register_access_disable(struct kbase_device *kbdev)
 {
-	kbase_pm_callback_conf *callbacks;
+	struct kbase_pm_callback_conf *callbacks;
 
-	callbacks = (kbase_pm_callback_conf *) kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_POWER_MANAGEMENT_CALLBACKS);
+	callbacks = (struct kbase_pm_callback_conf *)kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_POWER_MANAGEMENT_CALLBACKS);
 
 	if (callbacks)
 		callbacks->power_off_callback(kbdev);
 }
 
-mali_error kbase_pm_init(kbase_device *kbdev)
+mali_error kbase_pm_init(struct kbase_device *kbdev)
 {
 	mali_error ret = MALI_ERROR_NONE;
-	kbase_pm_callback_conf *callbacks;
+	struct kbase_pm_callback_conf *callbacks;
 
 	KBASE_DEBUG_ASSERT(kbdev != NULL);
 
@@ -64,7 +68,7 @@ mali_error kbase_pm_init(kbase_device *kbdev)
 	kbdev->pm.gpu_in_desired_state = MALI_TRUE;
 	init_waitqueue_head(&kbdev->pm.gpu_in_desired_state_wait);
 
-	callbacks = (kbase_pm_callback_conf *) kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_POWER_MANAGEMENT_CALLBACKS);
+	callbacks = (struct kbase_pm_callback_conf *)kbasep_get_config_value(kbdev, kbdev->config_attributes, KBASE_CONFIG_ATTR_POWER_MANAGEMENT_CALLBACKS);
 	if (callbacks) {
 		kbdev->pm.callback_power_on = callbacks->power_on_callback;
 		kbdev->pm.callback_power_off = callbacks->power_off_callback;
@@ -124,7 +128,7 @@ workq_fail:
 
 KBASE_EXPORT_TEST_API(kbase_pm_init)
 
-void kbase_pm_do_poweron(kbase_device *kbdev, mali_bool is_resume)
+void kbase_pm_do_poweron(struct kbase_device *kbdev, mali_bool is_resume)
 {
 	lockdep_assert_held(&kbdev->pm.lock);
 
@@ -141,7 +145,7 @@ void kbase_pm_do_poweron(kbase_device *kbdev, mali_bool is_resume)
 	 * will wait for that state to be reached anyway */
 }
 
-void kbase_pm_do_poweroff(kbase_device *kbdev, mali_bool is_suspend)
+void kbase_pm_do_poweroff(struct kbase_device *kbdev, mali_bool is_suspend)
 {
 	unsigned long flags;
 	mali_bool cores_are_available;
@@ -180,7 +184,7 @@ void kbase_pm_do_poweroff(kbase_device *kbdev, mali_bool is_suspend)
 	kbase_pm_clock_off(kbdev, is_suspend);
 }
 
-mali_error kbase_pm_powerup(kbase_device *kbdev)
+mali_error kbase_pm_powerup(struct kbase_device *kbdev)
 {
 	unsigned long flags;
 	mali_error ret;
@@ -193,7 +197,7 @@ mali_error kbase_pm_powerup(kbase_device *kbdev)
 	KBASE_DEBUG_ASSERT(!kbase_pm_is_suspending(kbdev));
 
 	/* Power up the GPU, don't enable IRQs as we are not ready to receive them. */
-	ret = kbase_pm_init_hw(kbdev, MALI_FALSE );
+	ret = kbase_pm_init_hw(kbdev, MALI_FALSE);
 	if (ret != MALI_ERROR_NONE) {
 		mutex_unlock(&kbdev->pm.lock);
 		return ret;
@@ -209,7 +213,6 @@ mali_error kbase_pm_powerup(kbase_device *kbdev)
 	spin_lock_irqsave(&kbdev->pm.gpu_cycle_counter_requests_lock, flags);
 	/* Ensure cycle counter is off */
 	kbdev->pm.gpu_cycle_counter_requests = 0;
-	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_COMMAND), GPU_COMMAND_CYCLE_COUNT_STOP, NULL);
 	spin_unlock_irqrestore(&kbdev->pm.gpu_cycle_counter_requests_lock, flags);
 
 	/* We are ready to receive IRQ's now as power policy is set up, so enable them now. */
@@ -232,12 +235,12 @@ mali_error kbase_pm_powerup(kbase_device *kbdev)
 
 KBASE_EXPORT_TEST_API(kbase_pm_powerup)
 
-void kbase_pm_context_active(kbase_device *kbdev)
+void kbase_pm_context_active(struct kbase_device *kbdev)
 {
 	(void)kbase_pm_context_active_handle_suspend(kbdev, KBASE_PM_SUSPEND_HANDLER_NOT_POSSIBLE);
 }
 
-int kbase_pm_context_active_handle_suspend(kbase_device *kbdev, kbase_pm_suspend_handler suspend_handler)
+int kbase_pm_context_active_handle_suspend(struct kbase_device *kbdev, enum kbase_pm_suspend_handler suspend_handler)
 {	
 	int c;
 	int old_count;
@@ -257,7 +260,7 @@ int kbase_pm_context_active_handle_suspend(kbase_device *kbdev, kbase_pm_suspend
 	{
 		switch (suspend_handler) {
 		case KBASE_PM_SUSPEND_HANDLER_DONT_REACTIVATE:
-			if (kbdev->pm.active_count != 0 )
+			if (kbdev->pm.active_count != 0)
 				break;
 			/* FALLTHROUGH */
 		case KBASE_PM_SUSPEND_HANDLER_DONT_INCREASE:
@@ -269,11 +272,12 @@ int kbase_pm_context_active_handle_suspend(kbase_device *kbdev, kbase_pm_suspend
 		case KBASE_PM_SUSPEND_HANDLER_NOT_POSSIBLE:
 			/* FALLTHROUGH */
 		default:
-			KBASE_DEBUG_ASSERT_MSG(MALI_FALSE,"unreachable");
+			KBASE_DEBUG_ASSERT_MSG(MALI_FALSE, "unreachable");
 			break;
 		}
 	}
 	c = ++kbdev->pm.active_count;
+	KBASE_TIMELINE_CONTEXT_ACTIVE(kbdev, c);
 
 	KBASE_TRACE_ADD_REFCOUNT(kbdev, PM_CONTEXT_ACTIVE, NULL, NULL, 0u, c);
 
@@ -296,7 +300,7 @@ int kbase_pm_context_active_handle_suspend(kbase_device *kbdev, kbase_pm_suspend
 
 KBASE_EXPORT_TEST_API(kbase_pm_context_active)
 
-void kbase_pm_context_idle(kbase_device *kbdev)
+void kbase_pm_context_idle(struct kbase_device *kbdev)
 {
 	int c;
 	int old_count;
@@ -314,6 +318,7 @@ void kbase_pm_context_idle(kbase_device *kbdev)
 	mutex_lock(&kbdev->pm.lock);
 
 	c = --kbdev->pm.active_count;
+	KBASE_TIMELINE_CONTEXT_ACTIVE(kbdev, c);
 
 	KBASE_TRACE_ADD_REFCOUNT(kbdev, PM_CONTEXT_IDLE, NULL, NULL, 0u, c);
 
@@ -340,7 +345,7 @@ void kbase_pm_context_idle(kbase_device *kbdev)
 
 KBASE_EXPORT_TEST_API(kbase_pm_context_idle)
 
-void kbase_pm_halt(kbase_device *kbdev)
+void kbase_pm_halt(struct kbase_device *kbdev)
 {
 	KBASE_DEBUG_ASSERT(kbdev != NULL);
 
@@ -352,7 +357,7 @@ void kbase_pm_halt(kbase_device *kbdev)
 
 KBASE_EXPORT_TEST_API(kbase_pm_halt)
 
-void kbase_pm_term(kbase_device *kbdev)
+void kbase_pm_term(struct kbase_device *kbdev)
 {
 	KBASE_DEBUG_ASSERT(kbdev != NULL);
 	KBASE_DEBUG_ASSERT(kbdev->pm.active_count == 0);
@@ -391,8 +396,8 @@ void kbase_pm_suspend(struct kbase_device *kbdev)
 
 	/* Cancel the keep_gpu_powered calls */
 	for (nr_keep_gpu_powered_ctxs = atomic_read(&kbdev->keep_gpu_powered_count);
-		 nr_keep_gpu_powered_ctxs > 0 ;
-		 --nr_keep_gpu_powered_ctxs ) {
+		 nr_keep_gpu_powered_ctxs > 0;
+		 --nr_keep_gpu_powered_ctxs) {
 		kbase_pm_context_idle(kbdev);
 	}
 
@@ -420,17 +425,16 @@ void kbase_pm_resume(struct kbase_device *kbdev)
 	/* MUST happen before any pm_context_active calls occur */
 	mutex_lock(&kbdev->pm.lock);
 	kbdev->pm.suspending = MALI_FALSE;
-	mutex_unlock(&kbdev->pm.lock);
-
 	kbase_pm_do_poweron(kbdev, MALI_TRUE);
+	mutex_unlock(&kbdev->pm.lock);
 
 	/* Initial active call, to power on the GPU/cores if needed */
 	kbase_pm_context_active(kbdev);
 
 	/* Restore the keep_gpu_powered calls */
 	for (nr_keep_gpu_powered_ctxs = atomic_read(&kbdev->keep_gpu_powered_count);
-		 nr_keep_gpu_powered_ctxs > 0 ;
-		 --nr_keep_gpu_powered_ctxs ) {
+		 nr_keep_gpu_powered_ctxs > 0;
+		 --nr_keep_gpu_powered_ctxs) {
 		kbase_pm_context_active(kbdev);
 	}
 
@@ -449,3 +453,4 @@ void kbase_pm_resume(struct kbase_device *kbdev)
 	 * need it and the policy doesn't want it on */
 	kbase_pm_context_idle(kbdev);
 }
+#endif /* KBASE_PM_EN */

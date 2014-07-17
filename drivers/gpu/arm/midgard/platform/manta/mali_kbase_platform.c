@@ -10,6 +10,7 @@
  * published by the Free Software FoundatIon.
  */
 
+
 /**
  * @file mali_kbase_platform.c
  * Platform-dependent init.
@@ -53,7 +54,7 @@
 static struct clk *clk_g3d = NULL;
 static int clk_g3d_status = 0;
 
-static int kbase_platform_power_clock_init(kbase_device *kbdev)
+static int kbase_platform_power_clock_init(struct kbase_device *kbdev)
 {
 	struct device *dev = kbdev->dev;
 	int timeout;
@@ -1029,7 +1030,7 @@ mali_error kbase_platform_init(struct kbase_device *kbdev)
 	return MALI_ERROR_FUNCTION_FAILED;
 }
 
-void kbase_platform_term(kbase_device *kbdev)
+void kbase_platform_term(struct kbase_device *kbdev)
 {
 	struct exynos_context *platform;
 

@@ -1,14 +1,19 @@
 /*
  *
- * (C) COPYRIGHT 2011 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT ARM Limited. All rights reserved.
  *
- * This program is free software and is provided to you under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
+ * This program is free software and is provided to you under the terms of the
+ * GNU General Public License version 2 as published by the Free Software
+ * Foundation, and any use by you of this program is subject to the terms
+ * of such GNU licence.
  *
- * A copy of the licence is included with the program, and can also be obtained from Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * A copy of the licence is included with the program, and can also be obtained
+ * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA  02110-1301, USA.
  *
  */
+
+
 
 #include <linux/ioport.h>
 #include <linux/clk.h>
@@ -31,7 +36,7 @@ static struct notifier_block mali_pm_nb = {
 	.notifier_call = mali_pm_notifier
 };
 
-static kbase_io_resources io_resources = {
+static struct kbase_io_resources io_resources = {
 	.job_irq_number = JOB_IRQ_NUMBER,
 	.mmu_irq_number = MMU_IRQ_NUMBER,
 	.gpu_irq_number = GPU_IRQ_NUMBER,
@@ -77,7 +82,7 @@ static int mali_pm_notifier(struct notifier_block *nb,unsigned long event,void* 
 /**
  *  * Exynos5 hardware specific initialization
  *   */
-mali_bool kbase_platform_exynos5_init(kbase_device *kbdev)
+mali_bool kbase_platform_exynos5_init(struct kbase_device *kbdev)
 {
  	if(MALI_ERROR_NONE == kbase_platform_init(kbdev))
  	{
@@ -93,7 +98,7 @@ mali_bool kbase_platform_exynos5_init(kbase_device *kbdev)
 /**
  *  * Exynos5 hardware specific termination
  *   */
-void kbase_platform_exynos5_term(kbase_device *kbdev)
+void kbase_platform_exynos5_term(struct kbase_device *kbdev)
 {
 	unregister_pm_notifier(&mali_pm_nb);
 #ifdef CONFIG_MALI_MIDGARD_DEBUG_SYS
@@ -102,13 +107,13 @@ void kbase_platform_exynos5_term(kbase_device *kbdev)
 	kbase_platform_term(kbdev);
 }
 
-kbase_platform_funcs_conf platform_funcs = {
+struct kbase_platform_funcs_conf platform_funcs = {
 	.platform_init_func = &kbase_platform_exynos5_init,
 	.platform_term_func = &kbase_platform_exynos5_term,
 };
 
 #ifdef CONFIG_MALI_MIDGARD_RT_PM
-static int pm_callback_power_on(kbase_device *kbdev)
+static int pm_callback_power_on(struct kbase_device *kbdev)
 {
 	int result;
 	int ret_val;
@@ -124,7 +129,7 @@ static int pm_callback_power_on(kbase_device *kbdev)
 	if(kbdev->dev->power.disable_depth > 0) {
 		if(platform->cmu_pmu_status == 0)
 			kbase_platform_cmu_pmu_control(kbdev, 1);
-		return ret_val;
+		return 1;
 	}
 	result = pm_runtime_resume(kbdev->dev);
 
@@ -133,10 +138,10 @@ static int pm_callback_power_on(kbase_device *kbdev)
 	else if (result < 0)
 		printk(KERN_ERR "pm_runtime_get_sync failed (%d)\n", result);
 
-	return ret_val;
+	return 1;
 }
 
-static void pm_callback_power_off(kbase_device *kbdev)
+static void pm_callback_power_off(struct kbase_device *kbdev)
 {
 	pm_schedule_suspend(kbdev->dev, RUNTIME_PM_DELAY_TIME);
 }
@@ -157,7 +162,7 @@ void kbase_device_runtime_disable(struct kbase_device *kbdev)
 	pm_runtime_disable(kbdev->dev);
 }
 
-static int pm_callback_runtime_on(kbase_device *kbdev)
+static int pm_callback_runtime_on(struct kbase_device *kbdev)
 {
 #ifdef CONFIG_MALI_MIDGARD_DVFS
 	struct exynos_context *platform = (struct exynos_context *)kbdev->platform_context;
@@ -175,7 +180,7 @@ static int pm_callback_runtime_on(kbase_device *kbdev)
 	return 0;
 }
 
-static void pm_callback_runtime_off(kbase_device *kbdev)
+static void pm_callback_runtime_off(struct kbase_device *kbdev)
 {
 	kbase_platform_clock_off(kbdev);
 #ifdef CONFIG_MALI_MIDGARD_DVFS
@@ -184,19 +189,19 @@ static void pm_callback_runtime_off(kbase_device *kbdev)
 #endif
 }
 
-static void pm_callback_resume(kbase_device *kbdev)
+static void pm_callback_resume(struct kbase_device *kbdev)
 {
 	int ret = pm_callback_runtime_on(kbdev);
 
 	WARN_ON(ret);
 }
 
-static void pm_callback_suspend(kbase_device *kbdev)
+static void pm_callback_suspend(struct kbase_device *kbdev)
 {
 	pm_callback_runtime_off(kbdev);
 }
 
-static kbase_pm_callback_conf pm_callbacks = {
+static struct kbase_pm_callback_conf pm_callbacks = {
 	.power_on_callback = pm_callback_power_on,
 	.power_off_callback = pm_callback_power_off,
 	.power_suspend_callback = pm_callback_suspend,
@@ -215,7 +220,7 @@ static kbase_pm_callback_conf pm_callbacks = {
 };
 #endif
 
-static kbase_attribute config_attributes[] = {
+static struct kbase_attribute config_attributes[] = {
 #ifdef CONFIG_MALI_MIDGARD_RT_PM
 	{
 	 KBASE_CONFIG_ATTR_POWER_MANAGEMENT_CALLBACKS,
@@ -229,13 +234,6 @@ static kbase_attribute config_attributes[] = {
 	 KBASE_CONFIG_ATTR_PLATFORM_FUNCS,
 	 (uintptr_t) &platform_funcs},
 	{
-	 KBASE_CONFIG_ATTR_GPU_FREQ_KHZ_MAX,
-	 533000},
-
-	{
-	 KBASE_CONFIG_ATTR_GPU_FREQ_KHZ_MIN,
-	 100000},
-	{
 	 KBASE_CONFIG_ATTR_JS_RESET_TIMEOUT_MS,
 	 500			/* 500ms before cancelling stuck jobs */
 	 },
@@ -247,12 +245,12 @@ static kbase_attribute config_attributes[] = {
 	 0}
 };
 
-static kbase_platform_config manta_platform_config = {
+static struct kbase_platform_config manta_platform_config = {
 	.attributes = config_attributes,
 	.io_resources = &io_resources
 };
 
-kbase_platform_config *kbase_get_platform_config(void)
+struct kbase_platform_config *kbase_get_platform_config(void)
 {
 	return &manta_platform_config;
 }

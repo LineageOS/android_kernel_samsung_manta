@@ -220,7 +220,9 @@ static void complete_rx(struct s3c_udc *dev, u8 ep_num)
 	else
 		xfer_size = (ep_tsr & 0x7fff);
 
-	__dma_single_cpu_to_dev(req->req.buf, req->req.length, DMA_FROM_DEVICE);
+	__dma_page_cpu_to_dev(virt_to_page(req->req.buf),
+		(unsigned long)((PAGE_SIZE - 1) & (uintptr_t)(req->req.buf)),
+		req->req.length, DMA_FROM_DEVICE);
 	xfer_length = req->req.length - xfer_size;
 	req->req.actual += min(xfer_length, req->req.length - req->req.actual);
 	is_short = (xfer_length < ep->ep.maxpacket);
@@ -751,7 +753,6 @@ static int s3c_ep0_write(struct s3c_udc *dev)
 {
 	struct s3c_request *req;
 	struct s3c_ep *ep = &dev->ep[0];
-	int ret;
 
 	if (list_empty(&ep->queue))
 		req = 0;
@@ -808,7 +809,9 @@ static int s3c_udc_get_status(struct s3c_udc *dev,
 		return 1;
 	}
 
-	__dma_single_cpu_to_dev(&g_status, 2, DMA_TO_DEVICE);
+	__dma_page_cpu_to_dev(virt_to_page(&g_status),
+		(unsigned long)((PAGE_SIZE - 1) & (uintptr_t)&g_status),
+		2, DMA_TO_DEVICE);
 
 	__raw_writel(virt_to_phys(&g_status),
 		dev->regs + S3C_UDC_OTG_DIEPDMA(EP0_CON));
@@ -1117,7 +1120,9 @@ static inline void set_test_mode(struct s3c_udc *dev)
 		printk(KERN_INFO "Test mode selector in set_feature request is"
 			"TEST PACKET\n");
 
-		__dma_single_cpu_to_dev(test_pkt, TEST_PKT_SIZE, DMA_TO_DEVICE);
+		__dma_page_cpu_to_dev(virt_to_page(test_pkt),
+			(unsigned long)((PAGE_SIZE - 1) & (uintptr_t)test_pkt),
+			TEST_PKT_SIZE, DMA_TO_DEVICE);
 		__raw_writel(virt_to_phys(test_pkt),
 			dev->regs + S3C_UDC_OTG_DIEPDMA(EP0_CON));
 

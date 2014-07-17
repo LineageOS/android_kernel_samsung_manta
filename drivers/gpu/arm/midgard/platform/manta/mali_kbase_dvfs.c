@@ -10,6 +10,7 @@
  * published by the Free Software FoundatIon.
  */
 
+
 /**
  * @file mali_kbase_dvfs.c
  * DVFS
@@ -72,7 +73,7 @@ static struct exynos5_bus_mif_handle *mem_freq_req;
 /*  This table and variable are using the check time share of GPU Clock  */
 /***********************************************************/
 
-typedef struct _mali_dvfs_info {
+typedef struct mali_dvfs_info {
 	unsigned int voltage;
 	unsigned int clock;
 	int min_threshold;
@@ -95,7 +96,7 @@ static mali_dvfs_info mali_dvfs_infotbl[] = {
 
 #ifdef CONFIG_MALI_MIDGARD_DVFS
 typedef struct _mali_dvfs_status_type {
-	kbase_device *kbdev;
+	struct kbase_device *kbdev;
 	int step;
 	int utilisation;
 #ifdef CONFIG_MALI_MIDGARD_FREQ_LOCK
@@ -199,7 +200,8 @@ static void mali_dvfs_event_proc(struct work_struct *w)
 
 static DECLARE_WORK(mali_dvfs_work, mali_dvfs_event_proc);
 
-int kbase_platform_dvfs_event(struct kbase_device *kbdev, u32 utilisation)
+int kbase_platform_dvfs_event(struct kbase_device *kbdev, u32 utilisation,
+		u32 util_gl_share, u32 util_cl_share[2])
 {
 	unsigned long flags;
 	struct exynos_context *platform;
@@ -549,7 +551,7 @@ int kbase_platform_set_voltage(struct device *dev, int vol)
 	return 0;
 }
 
-void kbase_platform_dvfs_set_clock(kbase_device *kbdev, int freq)
+void kbase_platform_dvfs_set_clock(struct kbase_device *kbdev, int freq)
 {
 	static struct clk *mout_gpll = NULL;
 	static struct clk *fin_gpll = NULL;
@@ -662,7 +664,7 @@ int kbase_platform_dvfs_get_level(int freq)
 	return -1;
 }
 
-void kbase_platform_dvfs_set_level(kbase_device *kbdev, int level)
+void kbase_platform_dvfs_set_level(struct kbase_device *kbdev, int level)
 {
 	static int prev_level = -1;
 	int f;

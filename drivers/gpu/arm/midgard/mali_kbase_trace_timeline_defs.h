@@ -17,6 +17,8 @@
 
 
 
+
+
 /* ***** IMPORTANT: THIS IS NOT A NORMAL HEADER FILE         *****
  * *****            DO NOT INCLUDE DIRECTLY                  *****
  * *****            THE LACK OF HEADER GUARDS IS INTENTIONAL ***** */
@@ -91,6 +93,8 @@
 	/* SW L2 power events */
 	KBASE_TIMELINE_TRACE_CODE(SW_FLOW_GPU_POWER_L2_POWERING,  "SW: GPU L2 powering",             "%d,%d", "_tgid,_writerof_l2_transitioning"),
 	KBASE_TIMELINE_TRACE_CODE(SW_FLOW_GPU_POWER_L2_ACTIVE,	  "SW: GPU L2 powering done",        "%d,%d", "_tgid,_finalconsumerof_l2_transitioning"),
+
+	KBASE_TIMELINE_TRACE_CODE(SW_SET_CONTEXT_ACTIVE,          "SW: Context Active",              "%d,%d",    "_tgid,_value_active"),
 
 	/*
 	 * BEGIN: Significant SW Functions that call kbase_pm_check_transitions_nolock()

@@ -20,6 +20,7 @@
  * Base kernel memory APIs
  */
 #include <mali_kbase.h>
+#include <linux/dma-mapping.h>
 #include <linux/highmem.h>
 #include <linux/mempool.h>
 #include <linux/mm.h>
@@ -27,6 +28,10 @@
 #include <linux/debugfs.h>
 #include <linux/memblock.h>
 #include <linux/seq_file.h>
+#include <linux/version.h>
+
+
+/* This code does not support having multiple kbase devices, or rmmod/insmod */
 
 static unsigned long kbase_carveout_start_pfn = ~0UL;
 static unsigned long kbase_carveout_end_pfn;
@@ -36,7 +41,7 @@ static unsigned int kbase_carveout_pages;
 static atomic_t kbase_carveout_used_pages;
 static atomic_t kbase_carveout_system_pages;
 
-static struct page *kbase_carveout_get_page(void)
+static struct page *kbase_carveout_get_page(struct kbase_mem_allocator *allocator)
 {
 	struct page *p = NULL;
 
@@ -49,16 +54,35 @@ static struct page *kbase_carveout_get_page(void)
 	mutex_unlock(&kbase_carveout_free_list_lock);
 
 	if (!p) {
+		dma_addr_t dma_addr;
+#if defined(CONFIG_ARM) && !CONFIG_HAVE_DMA_ATTRS && LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0)
+		/* DMA cache sync fails for HIGHMEM before 3.5 on ARM */
+		p = alloc_page(GFP_USER);
+#else
 		p = alloc_page(GFP_HIGHUSER);
-		if (p) {
-			atomic_inc(&kbase_carveout_system_pages);
-		}
-	}
+#endif
+		if (!p)
+			goto out;
 
+		dma_addr = dma_map_page(allocator->kbdev->dev, p, 0, PAGE_SIZE,
+				DMA_BIDIRECTIONAL);
+		if (dma_mapping_error(allocator->kbdev->dev, dma_addr)) {
+			__free_page(p);
+			p = NULL;
+			goto out;
+		}
+
+		SetPagePrivate(p);
+		set_page_private(p, dma_addr);
+		BUG_ON(dma_addr != PFN_PHYS(page_to_pfn(p)));
+		atomic_inc(&kbase_carveout_system_pages);
+	}
+out:
 	return p;
 }
 
-static void kbase_carveout_put_page(struct page *p)
+static void kbase_carveout_put_page(struct page *p,
+				    struct kbase_mem_allocator *allocator)
 {
 	if (page_to_pfn(p) >= kbase_carveout_start_pfn &&
 			page_to_pfn(p) <= kbase_carveout_end_pfn) {
@@ -67,6 +91,10 @@ static void kbase_carveout_put_page(struct page *p)
 		atomic_dec(&kbase_carveout_used_pages);
 		mutex_unlock(&kbase_carveout_free_list_lock);
 	} else {
+		dma_unmap_page(allocator->kbdev->dev, page_private(p),
+				PAGE_SIZE,
+				DMA_BIDIRECTIONAL);
+		ClearPagePrivate(p);
 		__free_page(p);
 		atomic_dec(&kbase_carveout_system_pages);
 	}
@@ -94,14 +122,29 @@ static const struct file_operations kbase_carveout_debugfs_fops = {
 	.release        = seq_release_private,
 };
 
-static int kbase_carveout_init(void)
+static int kbase_carveout_init(struct device *dev)
 {
 	unsigned long pfn;
+	static int once = 0;
 
 	mutex_lock(&kbase_carveout_free_list_lock);
+	BUG_ON(once);
+	once = 1;
 
 	for (pfn = kbase_carveout_start_pfn; pfn <= kbase_carveout_end_pfn; pfn++) {
 		struct page *p = pfn_to_page(pfn);
+		dma_addr_t dma_addr;
+
+		dma_addr = dma_map_page(dev, p, 0, PAGE_SIZE,
+				DMA_BIDIRECTIONAL);
+		if (dma_mapping_error(dev, dma_addr)) {
+			goto out_rollback;
+		}
+
+		SetPagePrivate(p);
+		set_page_private(p, dma_addr);
+		BUG_ON(dma_addr != PFN_PHYS(page_to_pfn(p)));
+
 		list_add_tail(&p->lru, &kbase_carveout_free_list);
 	}
 
@@ -111,14 +154,32 @@ static int kbase_carveout_init(void)
 		    &kbase_carveout_debugfs_fops);
 
 	return 0;
+
+out_rollback:
+	while (!list_empty(&kbase_carveout_free_list)) {
+		struct page *p;
+		p = list_first_entry(&kbase_carveout_free_list, struct page, lru);
+		dma_unmap_page(dev, page_private(p),
+				PAGE_SIZE,
+				DMA_BIDIRECTIONAL);
+		ClearPagePrivate(p);
+		list_del(&p->lru);
+	}
+
+	mutex_unlock(&kbase_carveout_free_list_lock);
+	return -ENOMEM;
 }
-subsys_initcall(kbase_carveout_init);
 
 int __init kbase_carveout_mem_reserve(phys_addr_t size)
 {
 	phys_addr_t mem;
 
+#if defined(CONFIG_ARM) && !CONFIG_HAVE_DMA_ATTRS && LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0)
+	/* DMA cache sync fails for HIGHMEM before 3.5 on ARM */
+	mem = memblock_alloc_base(size, PAGE_SIZE, MEMBLOCK_ALLOC_ACCESSIBLE);
+#else
 	mem = memblock_alloc_base(size, PAGE_SIZE, MEMBLOCK_ALLOC_ANYWHERE);
+#endif
 	if (mem == 0) {
 		pr_warning("%s: Failed to allocate %d for kbase carveout\n",
 				__func__, size);
@@ -132,13 +193,23 @@ int __init kbase_carveout_mem_reserve(phys_addr_t size)
 	return 0;
 }
 
+int kbase_mem_lowlevel_init(struct kbase_device *kbdev)
+{
+	return kbase_carveout_init(kbdev->dev);
+}
+
+void kbase_mem_lowlevel_term(struct kbase_device *kbdev)
+{
+	return;
+}
+
 STATIC int kbase_mem_allocator_shrink(struct shrinker *s, struct shrink_control *sc)
 {
-	kbase_mem_allocator * allocator;
+	struct kbase_mem_allocator * allocator;
 	int i;
 	int freed;
 
-	allocator = container_of(s, kbase_mem_allocator, free_list_reclaimer);
+	allocator = container_of(s, struct kbase_mem_allocator, free_list_reclaimer);
 
 	if (sc->nr_to_scan == 0)
 		return atomic_read(&allocator->free_list_size);
@@ -158,17 +229,21 @@ STATIC int kbase_mem_allocator_shrink(struct shrinker *s, struct shrink_control 
 		BUG_ON(list_empty(&allocator->free_list_head));
 		p = list_first_entry(&allocator->free_list_head, struct page, lru);
 		list_del(&p->lru);
-		kbase_carveout_put_page(p);
+		kbase_carveout_put_page(p, allocator);
 	}
 	mutex_unlock(&allocator->free_list_lock);
 	return atomic_read(&allocator->free_list_size);
 }
 
-mali_error kbase_mem_allocator_init(kbase_mem_allocator * const allocator, unsigned int max_size)
+mali_error kbase_mem_allocator_init(struct kbase_mem_allocator * const allocator,
+		unsigned int max_size, struct kbase_device *kbdev)
 {
 	KBASE_DEBUG_ASSERT(NULL != allocator);
+	KBASE_DEBUG_ASSERT(kbdev);
 
 	INIT_LIST_HEAD(&allocator->free_list_head);
+
+	allocator->kbdev = kbdev;
 
 	mutex_init(&allocator->free_list_lock);
 
@@ -186,24 +261,25 @@ mali_error kbase_mem_allocator_init(kbase_mem_allocator * const allocator, unsig
 	return MALI_ERROR_NONE;
 }
 
-void kbase_mem_allocator_term(kbase_mem_allocator *allocator)
+void kbase_mem_allocator_term(struct kbase_mem_allocator *allocator)
 {
 	KBASE_DEBUG_ASSERT(NULL != allocator);
 
 	unregister_shrinker(&allocator->free_list_reclaimer);
 
-	while (!list_empty(&allocator->free_list_head))
-	{
-		struct page * p;
-		p = list_first_entry(&allocator->free_list_head, struct page, lru);
+	while (!list_empty(&allocator->free_list_head)) {
+		struct page *p;
+		p = list_first_entry(&allocator->free_list_head, struct page,
+				lru);
 		list_del(&p->lru);
-		kbase_carveout_put_page(p);
+
+		kbase_carveout_put_page(p, allocator);
 	}
 	mutex_destroy(&allocator->free_list_lock);
 }
 
 
-mali_error kbase_mem_allocator_alloc(kbase_mem_allocator *allocator, size_t nr_pages, phys_addr_t *pages)
+mali_error kbase_mem_allocator_alloc(struct kbase_mem_allocator *allocator, size_t nr_pages, phys_addr_t *pages)
 {
 	struct page * p;
 	void * mp;
@@ -239,21 +315,22 @@ mali_error kbase_mem_allocator_alloc(kbase_mem_allocator *allocator, size_t nr_p
 		return MALI_ERROR_NONE;
 
 	/* If not all pages were sourced from the pool, request new ones. */
-	for (; i < nr_pages; i++)
-	{
-		p = kbase_carveout_get_page();
+	for (; i < nr_pages; i++) {
+		p = kbase_carveout_get_page(allocator);
 		if (NULL == p)
-		{
 			goto err_out_roll_back;
-		}
+
 		mp = kmap(p);
-		if (NULL == mp)
-		{
-			kbase_carveout_put_page(p);
+		if (NULL == mp) {
+			kbase_carveout_put_page(p, allocator);
 			goto err_out_roll_back;
 		}
-		memset(mp, 0x00, PAGE_SIZE); /* instead of __GFP_ZERO, so we can do cache maintenance */
-		kbase_sync_to_memory(PFN_PHYS(page_to_pfn(p)), mp, PAGE_SIZE);
+		memset(mp, 0x00, PAGE_SIZE); /* instead of __GFP_ZERO, so we can
+						do cache maintenance */
+		dma_sync_single_for_device(allocator->kbdev->dev,
+					   page_private(p),
+					   PAGE_SIZE,
+					   DMA_BIDIRECTIONAL);
 		kunmap(p);
 		pages[i] = PFN_PHYS(page_to_pfn(p));
 	}
@@ -261,18 +338,17 @@ mali_error kbase_mem_allocator_alloc(kbase_mem_allocator *allocator, size_t nr_p
 	return MALI_ERROR_NONE;
 
 err_out_roll_back:
-	while (i--)
-	{
-		struct page * p;
+	while (i--) {
+		struct page *p;
 		p = pfn_to_page(PFN_DOWN(pages[i]));
 		pages[i] = (phys_addr_t)0;
-		kbase_carveout_put_page(p);
+		kbase_carveout_put_page(p, allocator);
 	}
 
 	return MALI_ERROR_OUT_OF_MEMORY;
 }
 
-void kbase_mem_allocator_free(kbase_mem_allocator *allocator, u32 nr_pages, phys_addr_t *pages, mali_bool sync_back)
+void kbase_mem_allocator_free(struct kbase_mem_allocator *allocator, u32 nr_pages, phys_addr_t *pages, mali_bool sync_back)
 {
 	int i = 0;
 	int page_count = 0;
@@ -289,40 +365,32 @@ void kbase_mem_allocator_free(kbase_mem_allocator *allocator, u32 nr_pages, phys
 	* or get too many on the free list, but the max_size is just a ballpark so it is ok
 	* providing that tofree doesn't exceed nr_pages
 	*/
-	tofree = MAX((int)allocator->free_list_max_size - atomic_read(&allocator->free_list_size),0);
+	tofree = MAX((int)allocator->free_list_max_size - atomic_read(&allocator->free_list_size), 0);
 	tofree = nr_pages - MIN(tofree, nr_pages);
-	for (; i < tofree; i++)
-	{
-		if (likely(0 != pages[i]))
-		{
-			struct page * p;
+	for (; i < tofree; i++) {
+		if (likely(0 != pages[i])) {
+			struct page *p;
 
 			p = pfn_to_page(PFN_DOWN(pages[i]));
 			pages[i] = (phys_addr_t)0;
-			kbase_carveout_put_page(p);
+			kbase_carveout_put_page(p, allocator);
 		}
 	}
 
-	for (; i < nr_pages; i++)
-	{
-		if (likely(0 != pages[i]))
-		{
-			struct page * p;
+	for (; i < nr_pages; i++) {
+		if (likely(0 != pages[i])) {
+			struct page *p;
 
 			p = pfn_to_page(PFN_DOWN(pages[i]));
 			pages[i] = (phys_addr_t)0;
-			/* Sync back the memory to ensure that future cache invalidations
-			 * don't trample on memory.
+			/* Sync back the memory to ensure that future cache
+			 * invalidations don't trample on memory.
 			 */
-			if( sync_back )
-			{
-				void* mp = kmap(p);
-				if( NULL != mp)
-				{
-					kbase_sync_to_cpu(PFN_PHYS(page_to_pfn(p)), mp, PAGE_SIZE);
-					kunmap(p);
-				}
-			}
+			if(sync_back)
+				dma_sync_single_for_cpu(allocator->kbdev->dev,
+						page_private(p),
+						PAGE_SIZE,
+						DMA_BIDIRECTIONAL);
 			list_add(&p->lru, &new_free_list_items);
 			page_count++;
 		}
