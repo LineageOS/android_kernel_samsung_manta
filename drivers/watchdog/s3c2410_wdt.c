@@ -509,18 +509,35 @@ static unsigned long wtdat_save;
 static int s3c2410wdt_suspend(struct platform_device *dev, pm_message_t state)
 {
 	unsigned long flags;
+	int err = 0;
 
 	/* Save watchdog state, and turn it off. */
 	spin_lock_irqsave(&wdt_lock, flags);
 
 	wtcon_save = readl(S3C2410_WTCON);
+	if (wtcon_save == 0) { /* Illegal value no presets, bandaid */
+		int ret;
+
+		err |= 1;
+		ret = __s3c2410wdt_set_heartbeat(&s3c2410_wdd,
+				s3c2410_wdd.timeout);
+		if (ret >= 0)
+			__s3c2410wdt_start();
+		else
+			err |= 2;
+		wtcon_save = readl(S3C2410_WTCON);
+	}
 	wtdat_save = readl(S3C2410_WTDAT);
 	/* Note that WTCNT doesn't need to be saved. */
 	__s3c2410wdt_stop();
 
 	spin_unlock_irqrestore(&wdt_lock, flags);
 
-	pr_info("suspend: watchdog %sabled (0x%08lx)\n",
+	if (err & 1)
+		dev_err(wdt_dev, "suspend: watchdog CON ZERO, reinitialize\n");
+	if (err & 2)
+		dev_err(wdt_dev, "suspend: reinitializing failed\n");
+	dev_info(wdt_dev, "suspend: watchdog %sabled (0x%08lx)\n",
 		(wtcon_save & S3C2410_WTCON_ENABLE) ? "en" : "dis", wtcon_save);
 	BUG_ON(!(wtcon_save & S3C2410_WTCON_ENABLE));
 
