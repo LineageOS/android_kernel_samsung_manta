@@ -169,9 +169,7 @@ static int s3c2410wdt_start(struct watchdog_device *wdd)
 
 static inline int __s3c2410wdt_is_running(void)
 {
-	unsigned long wtcon = readl(S3C2410_WTCON);
-	BUG_ON(wtcon == 0);
-	return wtcon & S3C2410_WTCON_ENABLE;
+	return readl(S3C2410_WTCON) & S3C2410_WTCON_ENABLE;
 }
 
 static int __s3c2410wdt_set_heartbeat(struct watchdog_device *wdd,
@@ -229,14 +227,12 @@ static int __s3c2410wdt_set_heartbeat(struct watchdog_device *wdd,
 
 void s3c2410wdt_save(void)
 {
-	BUG_ON(readl(S3C2410_WTCON) == 0);
 	s3c_pm_do_save(wdt_save, ARRAY_SIZE(wdt_save));
 }
 
 void s3c2410wdt_restore(void)
 {
 	s3c_pm_do_restore_core(wdt_save, ARRAY_SIZE(wdt_save));
-	BUG_ON(readl(S3C2410_WTCON) == 0);
 }
 
 static int s3c2410wdt_set_heartbeat(struct watchdog_device *wdd,
@@ -245,7 +241,6 @@ static int s3c2410wdt_set_heartbeat(struct watchdog_device *wdd,
 	int ret;
 	unsigned long flags;
 
-	BUG_ON(readl(S3C2410_WTCON) == 0);
 	spin_lock_irqsave(&wdt_lock, flags);
 	ret = __s3c2410wdt_set_heartbeat(wdd, timeout);
 	spin_unlock_irqrestore(&wdt_lock, flags);
@@ -514,34 +509,17 @@ static unsigned long wtdat_save;
 static int s3c2410wdt_suspend(struct platform_device *dev, pm_message_t state)
 {
 	unsigned long flags;
-	int err = 0;
 
 	/* Save watchdog state, and turn it off. */
 	spin_lock_irqsave(&wdt_lock, flags);
 
 	wtcon_save = readl(S3C2410_WTCON);
-	if (wtcon_save == 0) { /* Illegal value no presets, bandaid */
-		int ret;
-
-		err |= 1;
-		ret = __s3c2410wdt_set_heartbeat(&s3c2410_wdd,
-				s3c2410_wdd.timeout);
-		if (ret >= 0)
-			__s3c2410wdt_start();
-		else
-			err |= 2;
-		wtcon_save = readl(S3C2410_WTCON);
-	}
 	wtdat_save = readl(S3C2410_WTDAT);
 	/* Note that WTCNT doesn't need to be saved. */
 	__s3c2410wdt_stop();
 
 	spin_unlock_irqrestore(&wdt_lock, flags);
 
-	if (err & 1)
-		pr_err("suspend: watchdog CON ZERO, reinitializing\n");
-	if (err & 2)
-		pr_err("suspend: reinitializing failed\n");
 	pr_info("suspend: watchdog %sabled (0x%08lx)\n",
 		(wtcon_save & S3C2410_WTCON_ENABLE) ? "en" : "dis", wtcon_save);
 	BUG_ON(!(wtcon_save & S3C2410_WTCON_ENABLE));
