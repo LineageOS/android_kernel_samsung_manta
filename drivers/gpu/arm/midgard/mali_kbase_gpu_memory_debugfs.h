@@ -17,8 +17,6 @@
 
 
 
-
-
 /**
  * @file mali_kbase_gpu_memory_debugfs.h
  * Header file for gpu_memory entry in debugfs

@@ -17,8 +17,6 @@
 
 
 
-
-
 /**
  * @file mali_kbase_gpuprops_types.h
  * Base kernel property query APIs
