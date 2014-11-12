@@ -16,8 +16,6 @@
 
 
 
-
-
 #include <mali_kbase.h>
 #include <mali_kbase_config.h>
 

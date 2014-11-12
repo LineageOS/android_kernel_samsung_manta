@@ -17,8 +17,6 @@
 
 
 
-
-
 /* ***** IMPORTANT: THIS IS NOT A NORMAL HEADER FILE         *****
  * *****            DO NOT INCLUDE DIRECTLY                  *****
  * *****            THE LACK OF HEADER GUARDS IS INTENTIONAL ***** */
