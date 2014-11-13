@@ -1747,7 +1747,6 @@ static void move_linked_works(struct work_struct *work, struct list_head *head,
 static void cwq_activate_delayed_work(struct work_struct *work)
 {
 	struct cpu_workqueue_struct *cwq = get_work_cwq(work);
-	struct list_head *pos = gcwq_determine_ins_pos(cwq->gcwq, cwq);
 
 	trace_workqueue_activate_work(work);
 	move_linked_works(work, &cwq->pool->worklist, NULL);
