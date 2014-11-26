@@ -17,6 +17,8 @@
 
 
 
+
+
 #include <mali_kbase.h>
 #include <mali_kbase_debug.h>
 
@@ -178,7 +180,6 @@ void kbase_event_cleanup(struct kbase_context *kctx)
 	 */
 	while (!list_empty(&kctx->event_list)) {
 		struct base_jd_event_v2 event;
-
 		kbase_event_dequeue(kctx, &event);
 	}
 }

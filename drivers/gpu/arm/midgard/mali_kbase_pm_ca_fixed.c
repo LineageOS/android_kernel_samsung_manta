@@ -15,6 +15,8 @@
 
 
 
+
+
 /**
  * @file mali_kbase_pm_ca_fixed.c
  * A power policy implementing fixed core availability
