@@ -15,6 +15,8 @@
 
 
 
+
+
 /**
  * @file mali_kbase_pm_ca.h
  * Base kernel core availability APIs

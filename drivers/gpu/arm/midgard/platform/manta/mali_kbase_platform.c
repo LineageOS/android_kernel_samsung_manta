@@ -10,6 +10,7 @@
  * published by the Free Software FoundatIon.
  */
 
+
 /**
  * @file mali_kbase_platform.c
  * Platform-dependent init.
