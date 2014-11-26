@@ -555,7 +555,4 @@ void kbasep_trace_clear(struct kbase_device *kbdev);
 #endif /* KBASE_TRACE_ENABLE */
 /** PRIVATE - do not use directly. Use KBASE_TRACE_DUMP() instead */
 void kbasep_trace_dump(struct kbase_device *kbdev);
-/* Compute job notifier register functions */
-int compute_job_register_notifier(struct notifier_block *nb);
-int compute_job_unregister_notifier(struct notifier_block *nb);
 #endif

@@ -31,7 +31,6 @@
 #include <linux/ump.h>
 #endif				/* CONFIG_UMP */
 #include <linux/random.h>
-#include <linux/notifier.h>
 
 #define beenthere(kctx, f, a...)  dev_dbg(kctx->kbdev->dev, "%s:" f, __func__, ##a)
 
@@ -39,8 +38,6 @@
 /* random32 was renamed to prandom_u32 in 3.8 */
 #define prandom_u32 random32
 #endif
-
-static ATOMIC_NOTIFIER_HEAD(compute_list);
 
 /*
  * This is the kernel side of the API. Only entry points are:
@@ -775,10 +772,6 @@ mali_bool jd_done_nolock(struct kbase_jd_atom *katom)
 								 * that we've got no more jobs (so we can be safely terminated) */
 	}
 
-	if (!(katom->core_req & BASE_JD_REQ_SOFT_JOB) &&
-		(katom->core_req & BASE_JD_REQ_ONLY_COMPUTE))
-		atomic_notifier_call_chain(&compute_list, COMPUTE_JOB_DONE, NULL);
-
 	return need_to_try_schedule_context;
 }
 
@@ -869,9 +862,6 @@ mali_bool jd_submit_atom(struct kbase_context *kctx,
 	katom->nice_prio = user_atom->prio;
 	katom->atom_flags = 0;
 	katom->retry_count = 0;
-
-	if (!(katom->core_req & BASE_JD_REQ_SOFT_JOB) && (katom->core_req & BASE_JD_REQ_ONLY_COMPUTE))
-		atomic_notifier_call_chain(&compute_list, COMPUTE_JOB_SCHEDULED, NULL);
 
 #ifdef CONFIG_KDS
 	/* Start by assuming that the KDS dependencies are satisfied,
@@ -1735,15 +1725,3 @@ void kbase_jd_exit(struct kbase_context *kctx)
 }
 
 KBASE_EXPORT_TEST_API(kbase_jd_exit)
-
-int compute_job_register_notifier(struct notifier_block *nb)
-{
-	return atomic_notifier_chain_register(
-		&compute_list, nb);
-}
-
-int compute_job_unregister_notifier(struct notifier_block *nb)
-{
-	return atomic_notifier_chain_unregister(
-		&compute_list, nb);
-}
