@@ -17,8 +17,6 @@
 
 
 
-
-
 /**
  * @file mali_kbase_device.c
  * Base kernel device APIs

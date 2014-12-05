@@ -15,8 +15,6 @@
 
 
 
-
-
 /**
  * @file mali_kbase_pm_policy.h
  * Power policy API definitions

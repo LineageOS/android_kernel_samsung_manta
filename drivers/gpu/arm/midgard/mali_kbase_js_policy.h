@@ -17,8 +17,6 @@
 
 
 
-
-
 /**
  * @file mali_kbase_js_policy.h
  * Job Scheduler Policy APIs.

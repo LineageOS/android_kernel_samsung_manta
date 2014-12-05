@@ -15,8 +15,6 @@
 
 
 
-
-
 /* NB taken from gator  */
 /*
  * List of possible actions to be controlled by Streamline.

@@ -55,7 +55,7 @@ static struct page *kbase_carveout_get_page(struct kbase_mem_allocator *allocato
 
 	if (!p) {
 		dma_addr_t dma_addr;
-#if defined(CONFIG_ARM) && !CONFIG_HAVE_DMA_ATTRS && LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0)
+#if defined(CONFIG_ARM) && !defined(CONFIG_HAVE_DMA_ATTRS) && LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0)
 		/* DMA cache sync fails for HIGHMEM before 3.5 on ARM */
 		p = alloc_page(GFP_USER);
 #else
@@ -72,8 +72,7 @@ static struct page *kbase_carveout_get_page(struct kbase_mem_allocator *allocato
 			goto out;
 		}
 
-		SetPagePrivate(p);
-		set_page_private(p, dma_addr);
+		kbase_set_dma_addr(p, dma_addr);
 		BUG_ON(dma_addr != PFN_PHYS(page_to_pfn(p)));
 		atomic_inc(&kbase_carveout_system_pages);
 	}
@@ -91,7 +90,7 @@ static void kbase_carveout_put_page(struct page *p,
 		atomic_dec(&kbase_carveout_used_pages);
 		mutex_unlock(&kbase_carveout_free_list_lock);
 	} else {
-		dma_unmap_page(allocator->kbdev->dev, page_private(p),
+		dma_unmap_page(allocator->kbdev->dev, kbase_dma_addr(p),
 				PAGE_SIZE,
 				DMA_BIDIRECTIONAL);
 		ClearPagePrivate(p);
@@ -125,7 +124,7 @@ static const struct file_operations kbase_carveout_debugfs_fops = {
 static int kbase_carveout_init(struct device *dev)
 {
 	unsigned long pfn;
-	static int once = 0;
+	static int once;
 
 	mutex_lock(&kbase_carveout_free_list_lock);
 	BUG_ON(once);
@@ -137,12 +136,10 @@ static int kbase_carveout_init(struct device *dev)
 
 		dma_addr = dma_map_page(dev, p, 0, PAGE_SIZE,
 				DMA_BIDIRECTIONAL);
-		if (dma_mapping_error(dev, dma_addr)) {
+		if (dma_mapping_error(dev, dma_addr))
 			goto out_rollback;
-		}
 
-		SetPagePrivate(p);
-		set_page_private(p, dma_addr);
+		kbase_set_dma_addr(p, dma_addr);
 		BUG_ON(dma_addr != PFN_PHYS(page_to_pfn(p)));
 
 		list_add_tail(&p->lru, &kbase_carveout_free_list);
@@ -158,8 +155,9 @@ static int kbase_carveout_init(struct device *dev)
 out_rollback:
 	while (!list_empty(&kbase_carveout_free_list)) {
 		struct page *p;
+
 		p = list_first_entry(&kbase_carveout_free_list, struct page, lru);
-		dma_unmap_page(dev, page_private(p),
+		dma_unmap_page(dev, kbase_dma_addr(p),
 				PAGE_SIZE,
 				DMA_BIDIRECTIONAL);
 		ClearPagePrivate(p);
@@ -174,14 +172,15 @@ int __init kbase_carveout_mem_reserve(phys_addr_t size)
 {
 	phys_addr_t mem;
 
-#if defined(CONFIG_ARM) && !CONFIG_HAVE_DMA_ATTRS && LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0)
+#if defined(CONFIG_ARM) && !defined(CONFIG_HAVE_DMA_ATTRS) \
+		&& LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0)
 	/* DMA cache sync fails for HIGHMEM before 3.5 on ARM */
 	mem = memblock_alloc_base(size, PAGE_SIZE, MEMBLOCK_ALLOC_ACCESSIBLE);
 #else
 	mem = memblock_alloc_base(size, PAGE_SIZE, MEMBLOCK_ALLOC_ANYWHERE);
 #endif
 	if (mem == 0) {
-		pr_warning("%s: Failed to allocate %d for kbase carveout\n",
+		pr_warn("%s: Failed to allocate %d for kbase carveout\n",
 				__func__, size);
 		return -ENOMEM;
 	}
@@ -200,12 +199,11 @@ int kbase_mem_lowlevel_init(struct kbase_device *kbdev)
 
 void kbase_mem_lowlevel_term(struct kbase_device *kbdev)
 {
-	return;
 }
 
 STATIC int kbase_mem_allocator_shrink(struct shrinker *s, struct shrink_control *sc)
 {
-	struct kbase_mem_allocator * allocator;
+	struct kbase_mem_allocator *allocator;
 	int i;
 	int freed;
 
@@ -222,9 +220,8 @@ STATIC int kbase_mem_allocator_shrink(struct shrinker *s, struct shrink_control 
 
 	atomic_sub(i, &allocator->free_list_size);
 
-	while (i--)
-	{
-		struct page * p;
+	while (i--) {
+		struct page *p;
 
 		BUG_ON(list_empty(&allocator->free_list_head));
 		p = list_first_entry(&allocator->free_list_head, struct page, lru);
@@ -269,6 +266,7 @@ void kbase_mem_allocator_term(struct kbase_mem_allocator *allocator)
 
 	while (!list_empty(&allocator->free_list_head)) {
 		struct page *p;
+
 		p = list_first_entry(&allocator->free_list_head, struct page,
 				lru);
 		list_del(&p->lru);
@@ -281,8 +279,8 @@ void kbase_mem_allocator_term(struct kbase_mem_allocator *allocator)
 
 mali_error kbase_mem_allocator_alloc(struct kbase_mem_allocator *allocator, size_t nr_pages, phys_addr_t *pages)
 {
-	struct page * p;
-	void * mp;
+	struct page *p;
+	void *mp;
 	int i;
 	int num_from_free_list;
 	struct list_head from_free_list = LIST_HEAD_INIT(from_free_list);
@@ -295,8 +293,7 @@ mali_error kbase_mem_allocator_alloc(struct kbase_mem_allocator *allocator, size
 	mutex_lock(&allocator->free_list_lock);
 	num_from_free_list = MIN(nr_pages, atomic_read(&allocator->free_list_size));
 	atomic_sub(num_from_free_list, &allocator->free_list_size);
-	for (i = 0; i < num_from_free_list; i++)
-	{
+	for (i = 0; i < num_from_free_list; i++) {
 		BUG_ON(list_empty(&allocator->free_list_head));
 		p = list_first_entry(&allocator->free_list_head, struct page, lru);
 		list_move(&p->lru, &from_free_list);
@@ -328,7 +325,7 @@ mali_error kbase_mem_allocator_alloc(struct kbase_mem_allocator *allocator, size
 		memset(mp, 0x00, PAGE_SIZE); /* instead of __GFP_ZERO, so we can
 						do cache maintenance */
 		dma_sync_single_for_device(allocator->kbdev->dev,
-					   page_private(p),
+					   kbase_dma_addr(p),
 					   PAGE_SIZE,
 					   DMA_BIDIRECTIONAL);
 		kunmap(p);
@@ -340,6 +337,7 @@ mali_error kbase_mem_allocator_alloc(struct kbase_mem_allocator *allocator, size
 err_out_roll_back:
 	while (i--) {
 		struct page *p;
+
 		p = pfn_to_page(PFN_DOWN(pages[i]));
 		pages[i] = (phys_addr_t)0;
 		kbase_carveout_put_page(p, allocator);
@@ -386,9 +384,9 @@ void kbase_mem_allocator_free(struct kbase_mem_allocator *allocator, u32 nr_page
 			/* Sync back the memory to ensure that future cache
 			 * invalidations don't trample on memory.
 			 */
-			if(sync_back)
+			if (sync_back)
 				dma_sync_single_for_cpu(allocator->kbdev->dev,
-						page_private(p),
+						kbase_dma_addr(p),
 						PAGE_SIZE,
 						DMA_BIDIRECTIONAL);
 			list_add(&p->lru, &new_free_list_items);
