@@ -172,7 +172,8 @@ int __init kbase_carveout_mem_reserve(phys_addr_t size)
 {
 	phys_addr_t mem;
 
-#if defined(CONFIG_ARM) && LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0)
+#if defined(CONFIG_ARM) && !defined(CONFIG_HAVE_DMA_ATTRS) \
+		&& LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0)
 	/* DMA cache sync fails for HIGHMEM before 3.5 on ARM */
 	mem = memblock_alloc_base(size, PAGE_SIZE, MEMBLOCK_ALLOC_ACCESSIBLE);
 #else
