@@ -17,8 +17,6 @@
 
 
 
-
-
 /**
  * @file mali_kbase_mem.h
  * Base kernel memory APIs
@@ -287,12 +285,13 @@ static INLINE size_t kbase_reg_current_backed_size(struct kbase_va_region * reg)
 
 static INLINE struct kbase_mem_phy_alloc * kbase_alloc_create(size_t nr_pages, enum kbase_memory_type type)
 {
-	struct kbase_mem_phy_alloc * alloc;
-	const size_t extra_pages = (sizeof(*alloc) + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
-	const size_t alloc_size = sizeof(*alloc) + sizeof(*alloc->pages) * nr_pages;
+	struct kbase_mem_phy_alloc *alloc;
+	const size_t alloc_size =
+			sizeof(*alloc) + sizeof(*alloc->pages) * nr_pages;
 
 	/* Prevent nr_pages*sizeof + sizeof(*alloc) from wrapping around. */
-	if (nr_pages > (((size_t) -1 / sizeof(*alloc->pages))) - extra_pages)
+	if (nr_pages > ((((size_t) -1) - sizeof(*alloc))
+			/ sizeof(*alloc->pages)))
 		return ERR_PTR(-ENOMEM);
 
 	/* Allocate based on the size to reduce internal fragmentation of vmem */
@@ -301,7 +300,7 @@ static INLINE struct kbase_mem_phy_alloc * kbase_alloc_create(size_t nr_pages, e
 	else
 		alloc = kzalloc(alloc_size, GFP_KERNEL);
 
-	if (!alloc) 
+	if (!alloc)
 		return ERR_PTR(-ENOMEM);
 
 	/* Store allocation method */
@@ -516,6 +515,8 @@ void kbase_mmu_interrupt(struct kbase_device *kbdev, u32 irq_stat);
 void *kbase_mmu_dump(struct kbase_context *kctx, int nr_pages);
 
 mali_error kbase_sync_now(struct kbase_context *kctx, struct base_syncset *syncset);
+void kbase_sync_single(struct kbase_context *kctx, phys_addr_t pa,
+		size_t size, kbase_sync_kmem_fn sync_fn);
 void kbase_pre_job_sync(struct kbase_context *kctx, struct base_syncset *syncsets, size_t nr);
 void kbase_post_job_sync(struct kbase_context *kctx, struct base_syncset *syncsets, size_t nr);
 
@@ -654,6 +655,29 @@ static inline void kbase_wait_write_flush(struct kbase_context *kctx)
 #else
 void kbase_wait_write_flush(struct kbase_context *kctx);
 #endif
+
+static inline void kbase_set_dma_addr(struct page *p, dma_addr_t dma_addr)
+{
+	SetPagePrivate(p);
+	if (sizeof(dma_addr_t) > sizeof(p->private)) {
+		/* on 32-bit ARM with LPAE dma_addr_t becomes larger, but the
+		 * private filed stays the same. So we have to be clever and
+		 * use the fact that we only store DMA addresses of whole pages,
+		 * so the low bits should be zero */
+		KBASE_DEBUG_ASSERT(!(dma_addr & (PAGE_SIZE - 1)));
+		set_page_private(p, dma_addr >> PAGE_SHIFT);
+	} else {
+		set_page_private(p, dma_addr);
+	}
+}
+
+static inline dma_addr_t kbase_dma_addr(struct page *p)
+{
+	if (sizeof(dma_addr_t) > sizeof(p->private))
+		return ((dma_addr_t)page_private(p)) << PAGE_SHIFT;
+
+	return (dma_addr_t)page_private(p);
+}
 
 /**
 * @brief Process a bus or page fault.

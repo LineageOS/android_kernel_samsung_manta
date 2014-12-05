@@ -15,8 +15,6 @@
 
 
 
-
-
 #ifndef _KBASE_10969_WORKAROUND_
 #define _KBASE_10969_WORKAROUND_
 
