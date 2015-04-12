@@ -17,8 +17,6 @@
 
 
 
-
-
 /**
  * @file mali_kbase_js_ctx_attr.h
  * Job Scheduler Context Attribute APIs

@@ -17,8 +17,6 @@
 
 
 
-
-
 /**
  * @file mali_kbase_context.c
  * Base kernel context APIs
@@ -35,7 +33,8 @@
  *
  * Allocate and init a kernel base context.
  */
-struct kbase_context *kbase_create_context(struct kbase_device *kbdev)
+struct kbase_context *
+kbase_create_context(struct kbase_device *kbdev, bool is_compat)
 {
 	struct kbase_context *kctx;
 	mali_error mali_err;
@@ -48,8 +47,12 @@ struct kbase_context *kbase_create_context(struct kbase_device *kbdev)
 	if (!kctx)
 		goto out;
 
+	/* creating a context is considered a disjoint event */
+	kbase_disjoint_event(kbdev);
+
 	kctx->kbdev = kbdev;
 	kctx->as_nr = KBASEP_AS_NR_INVALID;
+	kctx->is_compat = is_compat;
 #ifdef CONFIG_MALI_TRACE_TIMELINE
 	kctx->timeline.owner_tgid = task_tgid_nr(current);
 #endif

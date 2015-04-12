@@ -17,8 +17,6 @@
 
 
 
-
-
 #ifndef _MALISW_STDTYPES_H_
 #define _MALISW_STDTYPES_H_
 

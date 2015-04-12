@@ -17,8 +17,6 @@
 
 
 
-
-
 /**
  * @file mali_kbase_pm_metrics_dummy.c
  * Dummy Metrics for power management.

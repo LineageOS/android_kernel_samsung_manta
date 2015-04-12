@@ -15,8 +15,6 @@
 
 
 
-
-
 /**
  * @file
  * Interface file for the direct implementation for MMU hardware access

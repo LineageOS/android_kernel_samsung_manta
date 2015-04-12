@@ -136,6 +136,46 @@ struct dw_mci_slot {
 
 static struct workqueue_struct *dw_mci_card_workqueue;
 
+static void dwmci_dumpregs(struct dw_mci *host)
+{
+	dev_err(&host->dev, ": ============== REGISTER DUMP ==============\n");
+	dev_err(&host->dev, ": CTRL:	0x%08x\n", mci_readl(host, CTRL));
+	dev_err(&host->dev, ": PWREN:	0x%08x\n", mci_readl(host, PWREN));
+	dev_err(&host->dev, ": CLKDIV:	0x%08x\n", mci_readl(host, CLKDIV));
+	dev_err(&host->dev, ": CLKSRC:	0x%08x\n", mci_readl(host, CLKSRC));
+	dev_err(&host->dev, ": CLKENA:	0x%08x\n", mci_readl(host, CLKENA));
+	dev_err(&host->dev, ": TMOUT:	0x%08x\n", mci_readl(host, TMOUT));
+	dev_err(&host->dev, ": CTYPE:	0x%08x\n", mci_readl(host, CTYPE));
+	dev_err(&host->dev, ": BLKSIZ:	0x%08x\n", mci_readl(host, BLKSIZ));
+	dev_err(&host->dev, ": BYTCNT:	0x%08x\n", mci_readl(host, BYTCNT));
+	dev_err(&host->dev, ": INTMSK:	0x%08x\n", mci_readl(host, INTMASK));
+	dev_err(&host->dev, ": CMDARG:	0x%08x\n", mci_readl(host, CMDARG));
+	dev_err(&host->dev, ": CMD:	0x%08x\n", mci_readl(host, CMD));
+	dev_err(&host->dev, ": MINTSTS:	0x%08x\n", mci_readl(host, MINTSTS));
+	dev_err(&host->dev, ": RINTSTS:	0x%08x\n", mci_readl(host, RINTSTS));
+	dev_err(&host->dev, ": STATUS:	0x%08x\n", mci_readl(host, STATUS));
+	dev_err(&host->dev, ": FIFOTH:	0x%08x\n", mci_readl(host, FIFOTH));
+	dev_err(&host->dev, ": CDETECT:	0x%08x\n", mci_readl(host, CDETECT));
+	dev_err(&host->dev, ": WRTPRT:	0x%08x\n", mci_readl(host, WRTPRT));
+	dev_err(&host->dev, ": GPIO:	0x%08x\n", mci_readl(host, GPIO));
+	dev_err(&host->dev, ": TCBCNT:	0x%08x\n", mci_readl(host, TCBCNT));
+	dev_err(&host->dev, ": TBBCNT:	0x%08x\n", mci_readl(host, TBBCNT));
+	dev_err(&host->dev, ": DEBNCE:	0x%08x\n", mci_readl(host, DEBNCE));
+	dev_err(&host->dev, ": USRID:	0x%08x\n", mci_readl(host, USRID));
+	dev_err(&host->dev, ": VERID:	0x%08x\n", mci_readl(host, VERID));
+	dev_err(&host->dev, ": HCON:	0x%08x\n", mci_readl(host, HCON));
+	dev_err(&host->dev, ": UHS_REG:	0x%08x\n", mci_readl(host, UHS_REG));
+	dev_err(&host->dev, ": BMOD:	0x%08x\n", mci_readl(host, BMOD));
+	dev_err(&host->dev, ": PLDMND:	0x%08x\n", mci_readl(host, PLDMND));
+	dev_err(&host->dev, ": DBADDR:	0x%08x\n", mci_readl(host, DBADDR));
+	dev_err(&host->dev, ": IDSTS:	0x%08x\n", mci_readl(host, IDSTS));
+	dev_err(&host->dev, ": IDINTEN:	0x%08x\n", mci_readl(host, IDINTEN));
+	dev_err(&host->dev, ": DSCADDR:	0x%08x\n", mci_readl(host, DSCADDR));
+	dev_err(&host->dev, ": BUFADDR:	0x%08x\n", mci_readl(host, BUFADDR));
+	dev_err(&host->dev, ": CLKSEL:	0x%08x\n", mci_readl(host, CLKSEL));
+	dev_err(&host->dev, ": ===========================================\n");
+}
+
 #if defined(CONFIG_DEBUG_FS)
 static int dw_mci_req_show(struct seq_file *s, void *v)
 {
@@ -2509,6 +2549,8 @@ static void dw_mci_timeout_timer(unsigned long data)
 			"cmd%d, state: %d, status: %08X, rintsts: %08X\n",
 			mrq->cmd->opcode, host->state,
 			mci_readl(host, STATUS), mci_readl(host, RINTSTS));
+
+		dwmci_dumpregs(host);
 
 		spin_lock(&host->lock);
 		host->data = NULL;
