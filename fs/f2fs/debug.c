@@ -33,7 +33,10 @@ static void update_general_status(struct f2fs_sb_info *sbi)
 	int i;
 
 	/* validation check of the segment numbers */
-	si->hit_ext = atomic_read(&sbi->read_hit_ext);
+	si->hit_largest = atomic_read(&sbi->read_hit_largest);
+	si->hit_cached = atomic_read(&sbi->read_hit_cached);
+	si->hit_rbtree = atomic_read(&sbi->read_hit_rbtree);
+	si->hit_total = si->hit_largest + si->hit_cached + si->hit_rbtree;
 	si->total_ext = atomic_read(&sbi->total_hit_ext);
 	si->ext_tree = sbi->total_ext_tree;
 	si->ext_node = atomic_read(&sbi->total_ext_node);
@@ -279,10 +282,16 @@ static int stat_show(struct seq_file *s, void *v)
 				si->bg_data_blks);
 		seq_printf(s, "  - node blocks : %d (%d)\n", si->node_blks,
 				si->bg_node_blks);
-		seq_printf(s, "\nExtent Hit Ratio: %d / %d\n",
-			   si->hit_ext, si->total_ext);
-		seq_printf(s, "\nExtent Tree Count: %d\n", si->ext_tree);
-		seq_printf(s, "\nExtent Node Count: %d\n", si->ext_node);
+		seq_puts(s, "\nExtent Cache:\n");
+		seq_printf(s, "  - Hit Count: L1-1:%d L1-2:%d L2:%d\n",
+				si->hit_largest, si->hit_cached,
+				si->hit_rbtree);
+		seq_printf(s, "  - Hit Ratio: %d%% (%d / %d)\n",
+				!si->total_ext ? 0 :
+				(si->hit_total * 100) / si->total_ext,
+				si->hit_total, si->total_ext);
+		seq_printf(s, "  - Inner Struct Count: tree: %d, node: %d\n",
+				si->ext_tree, si->ext_node);
 		seq_puts(s, "\nBalancing F2FS Async:\n");
 		seq_printf(s, "  - inmem: %4d, wb: %4d\n",
 			   si->inmem_pages, si->wb_pages);
@@ -370,7 +379,9 @@ int f2fs_build_stats(struct f2fs_sb_info *sbi)
 	sbi->stat_info = si;
 
 	atomic_set(&sbi->total_hit_ext, 0);
-	atomic_set(&sbi->read_hit_ext, 0);
+	atomic_set(&sbi->read_hit_rbtree, 0);
+	atomic_set(&sbi->read_hit_largest, 0);
+	atomic_set(&sbi->read_hit_cached, 0);
 
 	atomic_set(&sbi->inline_xattr, 0);
 	atomic_set(&sbi->inline_inode, 0);

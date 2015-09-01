@@ -159,7 +159,7 @@ static void __set_nat_cache_dirty(struct f2fs_nm_info *nm_i,
 
 	head = radix_tree_lookup(&nm_i->nat_set_root, set);
 	if (!head) {
-		head = f2fs_kmem_cache_alloc(nat_entry_set_slab, GFP_ATOMIC);
+		head = f2fs_kmem_cache_alloc(nat_entry_set_slab, GFP_NOFS);
 
 		INIT_LIST_HEAD(&head->entry_list);
 		INIT_LIST_HEAD(&head->set_list);
@@ -246,7 +246,7 @@ static struct nat_entry *grab_nat_entry(struct f2fs_nm_info *nm_i, nid_t nid)
 {
 	struct nat_entry *new;
 
-	new = f2fs_kmem_cache_alloc(nat_entry_slab, GFP_ATOMIC);
+	new = f2fs_kmem_cache_alloc(nat_entry_slab, GFP_NOFS);
 	f2fs_radix_tree_insert(&nm_i->nat_root, nid, new);
 	memset(new, 0, sizeof(struct nat_entry));
 	nat_set_nid(new, nid);
@@ -306,6 +306,10 @@ static void set_node_addr(struct f2fs_sb_info *sbi, struct node_info *ni,
 	if (nat_get_blkaddr(e) != NEW_ADDR && new_blkaddr == NULL_ADDR) {
 		unsigned char version = nat_get_version(e);
 		nat_set_version(e, inc_node_version(version));
+
+		/* in order to reuse the nid */
+		if (nm_i->next_scan_nid > ni->nid)
+			nm_i->next_scan_nid = ni->nid;
 	}
 
 	/* change address */
@@ -898,17 +902,20 @@ int truncate_xattr_node(struct inode *inode, struct page *page)
  * Caller should grab and release a rwsem by calling f2fs_lock_op() and
  * f2fs_unlock_op().
  */
-void remove_inode_page(struct inode *inode)
+int remove_inode_page(struct inode *inode)
 {
 	struct dnode_of_data dn;
+	int err;
 
 	set_new_dnode(&dn, inode, NULL, NULL, inode->i_ino);
-	if (get_dnode_of_data(&dn, 0, LOOKUP_NODE))
-		return;
+	err = get_dnode_of_data(&dn, 0, LOOKUP_NODE);
+	if (err)
+		return err;
 
-	if (truncate_xattr_node(inode, dn.inode_page)) {
+	err = truncate_xattr_node(inode, dn.inode_page);
+	if (err) {
 		f2fs_put_dnode(&dn);
-		return;
+		return err;
 	}
 
 	/* remove potential inline_data blocks */
@@ -922,6 +929,7 @@ void remove_inode_page(struct inode *inode)
 
 	/* will put inode & node pages */
 	truncate_node(&dn);
+	return 0;
 }
 
 struct page *new_inode_page(struct inode *inode)
@@ -1571,6 +1579,8 @@ retry:
 
 	/* We should not use stale free nids created by build_free_nids */
 	if (nm_i->fcnt && !on_build_free_nids(nm_i)) {
+		struct node_info ni;
+
 		f2fs_bug_on(sbi, list_empty(&nm_i->free_nid_list));
 		list_for_each_entry(i, &nm_i->free_nid_list, list)
 			if (i->state == NID_NEW)
@@ -1581,6 +1591,13 @@ retry:
 		i->state = NID_ALLOC;
 		nm_i->fcnt--;
 		spin_unlock(&nm_i->free_nid_list_lock);
+
+		/* check nid is allocated already */
+		get_node_info(sbi, *nid, &ni);
+		if (ni.blk_addr != NULL_ADDR) {
+			alloc_nid_done(sbi, *nid);
+			goto retry;
+		}
 		return true;
 	}
 	spin_unlock(&nm_i->free_nid_list_lock);
@@ -1653,11 +1670,9 @@ int try_to_free_nids(struct f2fs_sb_info *sbi, int nr_shrink)
 		if (i->state == NID_ALLOC)
 			continue;
 		__del_from_free_nid_list(nm_i, i);
-		nm_i->fcnt--;
-		spin_unlock(&nm_i->free_nid_list_lock);
 		kmem_cache_free(free_nid_slab, i);
+		nm_i->fcnt--;
 		nr_shrink--;
-		spin_lock(&nm_i->free_nid_list_lock);
 	}
 	spin_unlock(&nm_i->free_nid_list_lock);
 	mutex_unlock(&nm_i->build_lock);

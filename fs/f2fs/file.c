@@ -204,8 +204,8 @@ int f2fs_sync_file(struct file *file, loff_t start, loff_t end, int datasync)
 	}
 
 	/* if the inode is dirty, let's recover all the time */
-	if (!datasync && is_inode_flag_set(fi, FI_DIRTY_INODE)) {
-		update_inode_page(inode);
+	if (!datasync) {
+		f2fs_write_inode(inode, NULL);
 		goto go_write;
 	}
 
@@ -462,9 +462,9 @@ static int f2fs_file_open(struct inode *inode, struct file *filp)
 
 int truncate_data_blocks_range(struct dnode_of_data *dn, int count)
 {
-	int nr_free = 0, ofs = dn->ofs_in_node;
 	struct f2fs_sb_info *sbi = F2FS_I_SB(dn->inode);
 	struct f2fs_node *raw_node;
+	int nr_free = 0, ofs = dn->ofs_in_node, len = count;
 	__le32 *addr;
 
 	raw_node = F2FS_NODE(dn->node_page);
@@ -477,14 +477,22 @@ int truncate_data_blocks_range(struct dnode_of_data *dn, int count)
 
 		dn->data_blkaddr = NULL_ADDR;
 		set_data_blkaddr(dn);
-		f2fs_update_extent_cache(dn);
 		invalidate_blocks(sbi, blkaddr);
 		if (dn->ofs_in_node == 0 && IS_INODE(dn->node_page))
 			clear_inode_flag(F2FS_I(dn->inode),
 						FI_FIRST_BLOCK_WRITTEN);
 		nr_free++;
 	}
+
 	if (nr_free) {
+		pgoff_t fofs;
+		/*
+		 * once we invalidate valid blkaddr in range [ofs, ofs + count],
+		 * we will invalidate all blkaddr in the whole range.
+		 */
+		fofs = start_bidx_of_node(ofs_of_node(dn->node_page),
+						F2FS_I(dn->inode)) + ofs;
+		f2fs_update_extent_cache_range(dn, fofs, 0, len);
 		dec_valid_block_count(sbi, dn->inode, nr_free);
 		set_page_dirty(dn->node_page);
 		sync_inode_page(dn);
@@ -596,24 +604,30 @@ out:
 	return err;
 }
 
-void f2fs_truncate(struct inode *inode, bool lock)
+int f2fs_truncate(struct inode *inode, bool lock)
 {
+	int err;
+
 	if (!(S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode) ||
 				S_ISLNK(inode->i_mode)))
-		return;
+		return 0;
 
 	trace_f2fs_truncate(inode);
 
 	/* we should check inline_data size */
 	if (f2fs_has_inline_data(inode) && !f2fs_may_inline_data(inode)) {
-		if (f2fs_convert_inline_inode(inode))
-			return;
+		err = f2fs_convert_inline_inode(inode);
+		if (err)
+			return err;
 	}
 
-	if (!truncate_blocks(inode, i_size_read(inode), lock)) {
-		inode->i_mtime = inode->i_ctime = CURRENT_TIME;
-		mark_inode_dirty(inode);
-	}
+	err = truncate_blocks(inode, i_size_read(inode), lock);
+	if (err)
+		return err;
+
+	inode->i_mtime = inode->i_ctime = CURRENT_TIME;
+	mark_inode_dirty(inode);
+	return 0;
 }
 
 int f2fs_getattr(struct vfsmount *mnt,
@@ -673,7 +687,9 @@ int f2fs_setattr(struct dentry *dentry, struct iattr *attr)
 
 		if (attr->ia_size <= i_size_read(inode)) {
 			truncate_setsize(inode, attr->ia_size);
-			f2fs_truncate(inode, true);
+			err = f2fs_truncate(inode, true);
+			if (err)
+				return err;
 			f2fs_balance_fs(F2FS_I_SB(inode));
 		} else {
 			/*
