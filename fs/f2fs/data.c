@@ -276,7 +276,8 @@ int f2fs_get_block(struct dnode_of_data *dn, pgoff_t index)
 	return f2fs_reserve_block(dn, index);
 }
 
-struct page *get_read_data_page(struct inode *inode, pgoff_t index, int rw)
+struct page *get_read_data_page(struct inode *inode, pgoff_t index,
+						int rw, bool for_write)
 {
 	struct address_space *mapping = inode->i_mapping;
 	struct dnode_of_data dn;
@@ -293,7 +294,7 @@ struct page *get_read_data_page(struct inode *inode, pgoff_t index, int rw)
 	if (f2fs_encrypted_inode(inode) && S_ISREG(inode->i_mode))
 		return read_mapping_page(mapping, index, NULL);
 
-	page = grab_cache_page(mapping, index);
+	page = f2fs_grab_cache_page(mapping, index, for_write);
 	if (!page)
 		return ERR_PTR(-ENOMEM);
 
@@ -353,7 +354,7 @@ struct page *find_data_page(struct inode *inode, pgoff_t index)
 		return page;
 	f2fs_put_page(page, 0);
 
-	page = get_read_data_page(inode, index, READ_SYNC);
+	page = get_read_data_page(inode, index, READ_SYNC, false);
 	if (IS_ERR(page))
 		return page;
 
@@ -373,12 +374,13 @@ struct page *find_data_page(struct inode *inode, pgoff_t index)
  * Because, the callers, functions in dir.c and GC, should be able to know
  * whether this page exists or not.
  */
-struct page *get_lock_data_page(struct inode *inode, pgoff_t index)
+struct page *get_lock_data_page(struct inode *inode, pgoff_t index,
+							bool for_write)
 {
 	struct address_space *mapping = inode->i_mapping;
 	struct page *page;
 repeat:
-	page = get_read_data_page(inode, index, READ_SYNC);
+	page = get_read_data_page(inode, index, READ_SYNC, for_write);
 	if (IS_ERR(page))
 		return page;
 
@@ -412,7 +414,7 @@ struct page *get_new_data_page(struct inode *inode,
 	struct dnode_of_data dn;
 	int err;
 repeat:
-	page = grab_cache_page(mapping, index);
+	page = f2fs_grab_cache_page(mapping, index, true);
 	if (!page) {
 		/*
 		 * before exiting, we should make sure ipage will be released
@@ -440,7 +442,7 @@ repeat:
 	} else {
 		f2fs_put_page(page, 1);
 
-		page = get_read_data_page(inode, index, READ_SYNC);
+		page = get_read_data_page(inode, index, READ_SYNC, true);
 		if (IS_ERR(page))
 			goto repeat;
 
@@ -525,6 +527,9 @@ static void __allocate_data_blocks(struct inode *inode, loff_t offset,
 		while (dn.ofs_in_node < end_offset && len) {
 			block_t blkaddr;
 
+			if (unlikely(f2fs_cp_error(sbi)))
+				goto sync_out;
+
 			blkaddr = datablock_addr(dn.node_page, dn.ofs_in_node);
 			if (blkaddr == NULL_ADDR || blkaddr == NEW_ADDR) {
 				if (__allocate_data_block(&dn))
@@ -567,6 +572,7 @@ static int f2fs_map_blocks(struct inode *inode, struct f2fs_map_blocks *map,
 {
 	unsigned int maxblocks = map->m_len;
 	struct dnode_of_data dn;
+	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
 	int mode = create ? ALLOC_NODE : LOOKUP_NODE_RA;
 	pgoff_t pgofs, end_offset;
 	int err = 0, ofs = 1;
@@ -600,6 +606,10 @@ static int f2fs_map_blocks(struct inode *inode, struct f2fs_map_blocks *map,
 
 	if (dn.data_blkaddr == NEW_ADDR || dn.data_blkaddr == NULL_ADDR) {
 		if (create) {
+			if (unlikely(f2fs_cp_error(sbi))) {
+				err = -EIO;
+				goto put_out;
+			}
 			err = __allocate_data_block(&dn);
 			if (err)
 				goto put_out;
@@ -653,6 +663,10 @@ get_next:
 
 		if (blkaddr == NEW_ADDR || blkaddr == NULL_ADDR) {
 			if (create) {
+				if (unlikely(f2fs_cp_error(sbi))) {
+					err = -EIO;
+					goto sync_out;
+				}
 				err = __allocate_data_block(&dn);
 				if (err)
 					goto sync_out;
@@ -961,7 +975,7 @@ submit_and_realloc:
 			}
 
 			bio = bio_alloc(GFP_KERNEL,
-				min_t(int, nr_pages, bio_get_nr_vecs(bdev)));
+				min_t(int, nr_pages, BIO_MAX_PAGES));
 			if (!bio) {
 				if (ctx)
 					f2fs_release_crypto_ctx(ctx);
@@ -1585,11 +1599,17 @@ static ssize_t f2fs_direct_IO(int rw, struct kiocb *iocb,
 
 	trace_f2fs_direct_IO_enter(inode, offset, count, rw);
 
-	if (rw & WRITE)
+	if (rw & WRITE) {
 		__allocate_data_blocks(inode, offset, count);
+		if (unlikely(f2fs_cp_error(F2FS_I_SB(inode)))) {
+			err = -EIO;
+			goto out;
+		}
+	}
 
 	err = blockdev_direct_IO(rw, iocb, inode, iov, offset, nr_segs,
 							get_data_block_dio);
+out:
 	if (err < 0 && (rw & WRITE))
 		f2fs_write_failed(mapping, offset + count);
 
