@@ -1,5 +1,7 @@
 CONFIG_EXPERIMENTAL=y
 # CONFIG_SWAP is not set
+CONFIG_UID_CPUTIME=y
+CONFIG_PROFILING=y
 CONFIG_SYSVIPC=y
 CONFIG_AUDIT=y
 CONFIG_CGROUPS=y
@@ -48,7 +50,7 @@ CONFIG_SECCOMP=y
 CONFIG_ARM_FLUSH_CONSOLE_ON_RESTART=y
 CONFIG_ZBOOT_ROM_TEXT=0x0
 CONFIG_ZBOOT_ROM_BSS=0x0
-CONFIG_CMDLINE="vmalloc=512M debug_core.break_on_panic=0 debug_core.break_on_exception=0 no_console_suspend s3c2410-wdt.tmr_atboot=1 s3c2410-wdt.tmr_margin=30 wire.search_count=5"
+CONFIG_CMDLINE="vmalloc=512M debug_core.break_on_panic=0 debug_core.break_on_exception=0 no_console_suspend s3c2410-wdt.tmr_atboot=1 s3c2410-wdt.tmr_margin=30 wire.search_count=5 androidboot.hardware=manta"
 CONFIG_CMDLINE_EXTEND=y
 CONFIG_CPU_FREQ=y
 CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE=y

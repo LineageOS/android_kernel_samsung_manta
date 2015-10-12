@@ -554,6 +554,12 @@ config AUDIENCE_ES305
 	  The ES305 is a Voice Processor with integrated DSP that processes
 	  i2s audio data to provide noise suppression and echo cancellation.
 
+config UID_CPUTIME
+	tristate "Per-UID cpu time statistics"
+	depends on PROFILING
+	help
+	  Per UID based cpu time statistics exported to /proc/uid_cputime
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"

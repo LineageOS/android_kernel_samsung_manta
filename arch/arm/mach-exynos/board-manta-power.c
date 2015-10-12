@@ -457,3 +457,34 @@ void __init exynos5_manta_power_init(void)
 	platform_add_devices(mxt_fixed_regulator_devices,
 				ARRAY_SIZE(mxt_fixed_regulator_devices));
 }
+
+
+int cpufreq_stats_platform_cpu_power_read_tables(int cpunum, u32 *out_values, size_t num)
+{
+	static const u32 powerVals[] = {231000, 284000, 295000, 315000, 333000, 386000, 413000, 431000, 510000, 546000, 584000, 633000, 710000, 825000, 937000, 1003000};
+	static const u32 cpuWeights[2] = {16384, 8847};
+	int i, numVals = sizeof(powerVals) / sizeof(*powerVals), numCpus = sizeof(cpuWeights) / sizeof(*cpuWeights);
+
+	/*
+	 * Our data source (power_profile.xml) only gives us values for 1st core,
+	 * and not per core as requested, so we weigh these. With weights: 100%, 54%.
+    * This is the same thing as what hammerhead does (for 1st and last core), for
+	 * better or worse.
+	 */
+
+	if (num > numVals) {
+		pr_err("cpufreq_stats_platform_cpu_power_read_tables asked for too many values (wanted %u have %u)\n", (int)num, numVals);
+		return -1;
+	}
+
+	if (cpunum > numCpus) {
+		pr_err("cpufreq_stats_platform_cpu_power_read_tables asked for too many CPUs (wanted %u have %u)\n", cpunum, numCpus);
+		return -2;
+	}
+
+	for (i = 0; i < num; i++)
+		*out_values++ = powerVals[i] * cpuWeights[cpunum] >> 14;
+
+	return 0;
+}
+
