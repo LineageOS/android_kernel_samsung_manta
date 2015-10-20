@@ -51,6 +51,8 @@ CONFIG_KERNEL_GZIP=y
 # CONFIG_KERNEL_LZO is not set
 CONFIG_DEFAULT_HOSTNAME="(none)"
 CONFIG_SWAP=y
+CONFIG_PROFILING=y
+CONFIG_UID_CPUTIME=y
 CONFIG_SYSVIPC=y
 CONFIG_SYSVIPC_SYSCTL=y
 # CONFIG_POSIX_MQUEUE is not set
@@ -554,7 +556,7 @@ CONFIG_ARM_FLUSH_CONSOLE_ON_RESTART=y
 # CONFIG_USE_OF is not set
 CONFIG_ZBOOT_ROM_TEXT=0
 CONFIG_ZBOOT_ROM_BSS=0
-CONFIG_CMDLINE="vmalloc=512M debug_core.break_on_panic=0 debug_core.break_on_exception=0 no_console_suspend s3c2410-wdt.tmr_atboot=1 s3c2410-wdt.tmr_margin=30 wire.search_count=5"
+CONFIG_CMDLINE="vmalloc=512M debug_core.break_on_panic=0 debug_core.break_on_exception=0 no_console_suspend s3c2410-wdt.tmr_atboot=1 s3c2410-wdt.tmr_margin=30 wire.search_count=5 androidboot.hardware=manta"
 # CONFIG_CMDLINE_FROM_BOOTLOADER is not set
 CONFIG_CMDLINE_EXTEND=y
 # CONFIG_CMDLINE_FORCE is not set
