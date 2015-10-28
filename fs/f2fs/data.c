@@ -772,12 +772,6 @@ int f2fs_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 	if (ret)
 		return ret;
 
-	if (f2fs_has_inline_data(inode)) {
-		ret = f2fs_inline_data_fiemap(inode, fieinfo, start, len);
-		if (ret != -EAGAIN)
-			return ret;
-	}
-
 	mutex_lock(&inode->i_mutex);
 
 	if (len >= isize) {
@@ -1039,9 +1033,6 @@ static int f2fs_read_data_pages(struct file *file,
 			struct list_head *pages, unsigned nr_pages)
 {
 	struct inode *inode = file->f_mapping->host;
-	struct page *page = list_entry(pages->prev, struct page, lru);
-
-	trace_f2fs_readpages(inode, page, nr_pages);
 
 	/* If the file has inline data, skip readpages */
 	if (f2fs_has_inline_data(inode))
@@ -1698,13 +1689,12 @@ static sector_t f2fs_bmap(struct address_space *mapping, sector_t block)
 {
 	struct inode *inode = mapping->host;
 
-	if (f2fs_has_inline_data(inode))
-		return 0;
-
-	/* make sure allocating whole blocks */
-	if (mapping_tagged(mapping, PAGECACHE_TAG_DIRTY))
-		filemap_write_and_wait(mapping);
-
+	/* we don't need to use inline_data strictly */
+	if (f2fs_has_inline_data(inode)) {
+		int err = f2fs_convert_inline_inode(inode);
+		if (err)
+			return err;
+	}
 	return generic_block_bmap(mapping, block, get_data_block_bmap);
 }
 

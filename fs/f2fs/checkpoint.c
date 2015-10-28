@@ -47,8 +47,7 @@ repeat:
 /*
  * We guarantee no failure on the returned page.
  */
-static struct page *__get_meta_page(struct f2fs_sb_info *sbi, pgoff_t index,
-							bool is_meta)
+struct page *get_meta_page(struct f2fs_sb_info *sbi, pgoff_t index)
 {
 	struct address_space *mapping = META_MAPPING(sbi);
 	struct page *page;
@@ -59,9 +58,6 @@ static struct page *__get_meta_page(struct f2fs_sb_info *sbi, pgoff_t index,
 		.blk_addr = index,
 		.encrypted_page = NULL,
 	};
-
-	if (unlikely(!is_meta))
-		fio.rw &= ~REQ_META;
 repeat:
 	page = grab_cache_page(mapping, index);
 	if (!page) {
@@ -94,17 +90,6 @@ repeat:
 out:
 	mark_page_accessed(page);
 	return page;
-}
-
-struct page *get_meta_page(struct f2fs_sb_info *sbi, pgoff_t index)
-{
-	return __get_meta_page(sbi, index, true);
-}
-
-/* for POR only */
-struct page *get_tmp_page(struct f2fs_sb_info *sbi, pgoff_t index)
-{
-	return __get_meta_page(sbi, index, false);
 }
 
 bool is_valid_blkaddr(struct f2fs_sb_info *sbi, block_t blkaddr, int type)
@@ -141,8 +126,7 @@ bool is_valid_blkaddr(struct f2fs_sb_info *sbi, block_t blkaddr, int type)
 /*
  * Readahead CP/NAT/SIT/SSA pages
  */
-int ra_meta_pages(struct f2fs_sb_info *sbi, block_t start, int nrpages,
-							int type, bool sync)
+int ra_meta_pages(struct f2fs_sb_info *sbi, block_t start, int nrpages, int type)
 {
 	block_t prev_blk_addr = 0;
 	struct page *page;
@@ -150,12 +134,9 @@ int ra_meta_pages(struct f2fs_sb_info *sbi, block_t start, int nrpages,
 	struct f2fs_io_info fio = {
 		.sbi = sbi,
 		.type = META,
-		.rw = sync ? (READ_SYNC | REQ_META | REQ_PRIO) : READA,
+		.rw = READ_SYNC | REQ_META | REQ_PRIO,
 		.encrypted_page = NULL,
 	};
-
-	if (unlikely(type == META_POR))
-		fio.rw &= ~REQ_META;
 
 	for (; nrpages-- > 0; blkno++) {
 
@@ -216,7 +197,7 @@ void ra_meta_pages_cond(struct f2fs_sb_info *sbi, pgoff_t index)
 	f2fs_put_page(page, 0);
 
 	if (readahead)
-		ra_meta_pages(sbi, index, MAX_BIO_BLOCKS(sbi), META_POR, true);
+		ra_meta_pages(sbi, index, MAX_BIO_BLOCKS(sbi), META_POR);
 }
 
 static int f2fs_write_meta_page(struct page *page,
@@ -523,7 +504,7 @@ int recover_orphan_inodes(struct f2fs_sb_info *sbi)
 	start_blk = __start_cp_addr(sbi) + 1 + __cp_payload(sbi);
 	orphan_blocks = __start_sum_addr(sbi) - 1 - __cp_payload(sbi);
 
-	ra_meta_pages(sbi, start_blk, orphan_blocks, META_CP, true);
+	ra_meta_pages(sbi, start_blk, orphan_blocks, META_CP);
 
 	for (i = 0; i < orphan_blocks; i++) {
 		struct page *page = get_meta_page(sbi, start_blk + i);
